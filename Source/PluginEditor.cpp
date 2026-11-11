@@ -217,8 +217,50 @@ InfiniteEditor::InfiniteEditor (InfiniteProcessor& p)
     addKnob ("lfoRate",  "Rate",      gLfo);
     addKnob ("lfoDepth", "Depth",     gLfo);
 
+    addKnob ("glide",    "Glide",     gOut);
     addKnob ("drive",    "Drive",     gOut);
     addKnob ("volume",   "Volume",    gOut);
+
+    // mono / slide
+    monoBtn.setClickingTogglesState (true);
+    monoAtt = std::make_unique<ButtonAtt> (proc.apvts, "mono", monoBtn);
+    addAndMakeVisible (monoBtn);
+
+    // effets : interrupteur + potards
+    struct FxDef { const char* on; const char* title; std::vector<std::pair<const char*, const char*>> knobs; };
+    const std::vector<FxDef> fxDefs = {
+        { "distOn",  "DISTORTION", { { "distDrive", "Drive" }, { "distTone", "Tone" }, { "distMix", "Mix" } } },
+        { "crushOn", "BITCRUSH",   { { "crushBits", "Bits" }, { "crushRate", "Downsample" }, { "crushMix", "Mix" } } },
+        { "eqOn",    "EQ",         { { "eqLow", "Low" }, { "eqMid", "Mid" }, { "eqHigh", "High" } } },
+        { "compOn",  "COMPRESSOR", { { "compThresh", "Threshold" }, { "compRatio", "Ratio" }, { "compGain", "Gain" } } },
+        { "chorOn",  "CHORUS",     { { "chorRate", "Rate" }, { "chorDepth", "Depth" }, { "chorMix", "Mix" } } },
+        { "flanOn",  "FLANGER",    { { "flanRate", "Rate" }, { "flanDepth", "Depth" }, { "flanFb", "Feedback" }, { "flanMix", "Mix" } } },
+        { "phasOn",  "PHASER",     { { "phasRate", "Rate" }, { "phasDepth", "Depth" }, { "phasFb", "Feedback" }, { "phasMix", "Mix" } } },
+        { "tremOn",  "TREMOLO",    { { "tremRate", "Rate" }, { "tremDepth", "Depth" }, { "tremPan", "Auto-pan" } } },
+        { "dlyOn",   "DELAY",      { { "dlyTime", "Time" }, { "dlyFb", "Feedback" }, { "dlyMix", "Mix" } } },
+        { "revOn",   "REVERB",     { { "revSize", "Size" }, { "revDamp", "Damping" }, { "revWidth", "Width" }, { "revMix", "Mix" } } }
+    };
+    for (size_t i = 0; i < fxDefs.size() && i < fxBtns.size(); ++i)
+    {
+        auto& b = fxBtns[i];
+        b.setButtonText (fxDefs[i].title);
+        b.setClickingTogglesState (true);
+        fxAtts[i] = std::make_unique<ButtonAtt> (proc.apvts, fxDefs[i].on, b);
+        addChildComponent (b);
+        for (auto& k : fxDefs[i].knobs) addKnob (k.first, k.second, gFx[i]);
+    }
+
+    // onglets SYNTH / FX
+    for (auto* t : { &synthTab, &fxTab })
+    {
+        t->setClickingTogglesState (true);
+        t->setRadioGroupId (102);
+        addAndMakeVisible (t);
+    }
+    synthTab.setToggleState (true, juce::dontSendNotification);
+    synthTab.onClick = [this] { if (synthTab.getToggleState()) showPage (false); };
+    fxTab.onClick    = [this] { if (fxTab.getToggleState())    showPage (true); };
+    showPage (false);
 
     startTimerHz (15);
     timerCallback();
@@ -234,6 +276,21 @@ InfiniteEditor::~InfiniteEditor()
 int InfiniteEditor::currentSeed() const { return (int) proc.apvts.state.getProperty ("seed", 1); }
 int InfiniteEditor::currentCat()  const { return (int) proc.apvts.state.getProperty ("catSel", 5); }
 float InfiniteEditor::pv (const char* id) const { return proc.apvts.getRawParameterValue (id)->load(); }
+
+void InfiniteEditor::showPage (bool fx)
+{
+    fxPage = fx;
+    for (auto* c : std::initializer_list<juce::Component*> { &scope, &filterD, &envD, &lfoD, &driveD, &w1, &w2, &monoBtn })
+        c->setVisible (! fx);
+    for (auto* g : { &gOsc, &gFilter, &gAmp, &gLfo, &gOut })
+        for (auto idx : *g) knobs[idx].slider->setVisible (! fx);
+    for (size_t i = 0; i < fxBtns.size(); ++i)
+    {
+        fxBtns[i].setVisible (fx);
+        for (auto idx : gFx[i]) knobs[idx].slider->setVisible (fx);
+    }
+    repaint();
+}
 
 void InfiniteEditor::mouseDown (const juce::MouseEvent& e)
 {
@@ -514,20 +571,38 @@ void InfiniteEditor::paint (juce::Graphics& g)
         g.setFont (juce::Font (juce::FontOptions (13.f, juce::Font::bold)));
         g.drawText (title, r.getX() + 22, r.getY() + 6, 220, 20, juce::Justification::centredLeft);
     };
-    drawPanel (pOsc, "OSCILLATORS");
-    drawPanel (pFilter, "FILTER");
-    drawPanel (pAmp, "AMP ENVELOPE");
-    drawPanel (pLfo, "LFO");
-    drawPanel (pOut, "OUTPUT");
+    if (! fxPage)
+    {
+        drawPanel (pOsc, "OSCILLATORS");
+        drawPanel (pFilter, "FILTER");
+        drawPanel (pAmp, "AMP ENVELOPE");
+        drawPanel (pLfo, "LFO");
+        drawPanel (pOut, "VOICE + OUTPUT");
+    }
+    else
+    {
+        for (auto& r : pFx)
+        {
+            if (r.isEmpty()) continue;
+            g.setColour (ui::panel());
+            g.fillRoundedRectangle (r.toFloat(), 10.f);
+            g.setColour (ui::panelEdge());
+            g.drawRoundedRectangle (r.toFloat().reduced (0.5f), 10.f, 1.f);
+        }
+    }
 
     // noms des potards et des oscillateurs
     g.setFont (juce::Font (juce::FontOptions (12.f)));
     g.setColour (ui::mute());
     for (auto& k : knobs)
-        g.drawText (k.name, k.labelRect, juce::Justification::centred);
+        if (k.slider->isVisible())
+            g.drawText (k.name, k.labelRect, juce::Justification::centred);
 
-    g.drawText ("Osc 1 shape", osc1Label, juce::Justification::centredLeft);
-    g.drawText ("Osc 2 shape", osc2Label, juce::Justification::centredLeft);
+    if (! fxPage)
+    {
+        g.drawText ("Osc 1 shape", osc1Label, juce::Justification::centredLeft);
+        g.drawText ("Osc 2 shape", osc2Label, juce::Justification::centredLeft);
+    }
 }
 
 void InfiniteEditor::resized()
@@ -584,7 +659,31 @@ void InfiniteEditor::resized()
     lfoD.setBounds (pLfo.getX() + 10, pLfo.getY() + 30, 220, 96);
     layoutKnobs (gLfo, juce::Rectangle<int> (pLfo.getX() + 10, pLfo.getY() + 134, 220, 102));
 
-    // sortie
-    driveD.setBounds (pOut.getX() + 10, pOut.getY() + 30, 252, 96);
+    // voix + sortie
+    driveD.setBounds (pOut.getX() + 10, pOut.getY() + 30, 252, 58);
+    monoBtn.setBounds (pOut.getX() + 10, pOut.getY() + 96, 252, 28);
     layoutKnobs (gOut, juce::Rectangle<int> (pOut.getX() + 10, pOut.getY() + 134, 252, 102));
+
+    // onglets
+    synthTab.setBounds (760, 94, 110, 30);
+    fxTab.setBounds (878, 94, 110, 30);
+
+    // page FX : 5 colonnes x 2 rangées
+    const int fw = 186, fh = 247, gap = 11;
+    for (size_t i = 0; i < pFx.size(); ++i)
+    {
+        const int col = (int) (i % 5), row = (int) (i / 5);
+        pFx[i] = juce::Rectangle<int> (13 + col * (fw + gap), 140 + row * (fh + 12), fw, fh);
+        fxBtns[i].setBounds (pFx[i].getX() + 10, pFx[i].getY() + 10, fw - 20, 28);
+
+        auto area = juce::Rectangle<int> (pFx[i].getX() + 8, pFx[i].getY() + 48, fw - 16, fh - 56);
+        const int cw = area.getWidth() / 2, ch = area.getHeight() / 2;
+        for (size_t j = 0; j < gFx[i].size(); ++j)
+        {
+            auto cell = juce::Rectangle<int> (area.getX() + (int) (j % 2) * cw, area.getY() + (int) (j / 2) * ch, cw, ch);
+            auto& k = knobs[gFx[i][j]];
+            k.labelRect = cell.removeFromTop (16);
+            k.slider->setBounds (cell.reduced (2, 0));
+        }
+    }
 }

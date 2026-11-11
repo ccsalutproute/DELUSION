@@ -4,6 +4,7 @@
 
 using APF = juce::AudioParameterFloat;
 using APC = juce::AudioParameterChoice;
+using APB = juce::AudioParameterBool;
 using PID = juce::ParameterID;
 
 static const char* kCats[] = { "Bass", "Lead", "Pad", "Pluck", "Keys" };
@@ -55,6 +56,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout InfiniteProcessor::createLay
         if (f.centre > 0.f) range.setSkewForCentre (f.centre);
         p.push_back (std::make_unique<APF> (PID { f.id, 1 }, f.name, range, f.def));
     }
+    for (auto& b : boolParams())
+        p.push_back (std::make_unique<APB> (PID { b.first, 1 }, b.second, false));
     return { p.begin(), p.end() };
 }
 
@@ -84,6 +87,7 @@ std::map<juce::String, float> InfiniteProcessor::makePatch (int cat, int seed)
 
     std::map<juce::String, float> m;
     for (auto& f : floatParams()) m[f.id] = f.def;
+    for (auto& b : boolParams()) m[b.first] = 0.f;
     m["osc1Wave"] = 1.f; m["osc2Wave"] = 1.f;
     m["volume"] = -6.f;
 
@@ -152,6 +156,43 @@ std::map<juce::String, float> InfiniteProcessor::makePatch (int cat, int seed)
             m["drive"]    = rf (0.f, 0.15f);
             break;
     }
+    // ---- glide et effets selon la catégorie ----
+    auto on = [&] (const char* id, float p) { m[id] = chance (p) ? 1.f : 0.f; return m[id] > 0.5f; };
+
+    if (cat == 1)        // Lead : mono + slide la plupart du temps
+    {
+        if (on ("mono", 0.8f)) m["glide"] = rf (0.04f, 0.18f);
+        if (on ("distOn", 0.3f)) { m["distDrive"] = rf (0.2f, 0.7f); m["distMix"] = rf (0.4f, 1.f); m["distTone"] = rl (3000, 12000); }
+        if (on ("chorOn", 0.3f)) { m["chorDepth"] = rf (0.2f, 0.6f); m["chorMix"] = rf (0.2f, 0.5f); }
+        if (on ("dlyOn", 0.6f))  { m["dlyTime"] = pick ({ 250, 300, 375, 500 }); m["dlyFb"] = rf (0.2f, 0.5f); m["dlyMix"] = rf (0.15f, 0.35f); }
+        if (on ("revOn", 0.6f))  { m["revSize"] = rf (0.4f, 0.8f); m["revMix"] = rf (0.15f, 0.35f); }
+        if (on ("phasOn", 0.15f)) { m["phasRate"] = rl (0.1f, 1.f); m["phasMix"] = rf (0.3f, 0.6f); }
+    }
+    else if (cat == 2)   // Pad : large et spatial
+    {
+        if (on ("chorOn", 0.6f)) { m["chorDepth"] = rf (0.3f, 0.8f); m["chorMix"] = rf (0.3f, 0.6f); m["chorRate"] = rl (0.1f, 1.f); }
+        if (on ("phasOn", 0.3f)) { m["phasRate"] = rl (0.05f, 0.5f); m["phasMix"] = rf (0.3f, 0.6f); }
+        if (on ("flanOn", 0.15f)) { m["flanRate"] = rl (0.05f, 0.3f); m["flanMix"] = rf (0.2f, 0.5f); }
+        if (on ("tremOn", 0.2f)) { m["tremRate"] = rl (0.2f, 2.f); m["tremDepth"] = rf (0.2f, 0.6f); m["tremPan"] = 1.f; }
+        if (on ("dlyOn", 0.3f))  { m["dlyTime"] = pick ({ 375, 500, 750 }); m["dlyFb"] = rf (0.3f, 0.6f); m["dlyMix"] = rf (0.1f, 0.3f); }
+        m["revOn"] = chance (0.9f) ? 1.f : 0.f;
+        m["revSize"] = rf (0.7f, 0.95f); m["revMix"] = rf (0.3f, 0.55f);
+    }
+    else if (cat == 3)   // Pluck : un peu de slide, beaucoup d'echo
+    {
+        if (on ("mono", 0.3f)) m["glide"] = rf (0.03f, 0.1f);
+        if (on ("dlyOn", 0.7f))  { m["dlyTime"] = pick ({ 250, 300, 375, 500 }); m["dlyFb"] = rf (0.25f, 0.55f); m["dlyMix"] = rf (0.15f, 0.35f); }
+        if (on ("revOn", 0.7f))  { m["revSize"] = rf (0.4f, 0.85f); m["revMix"] = rf (0.15f, 0.4f); }
+        if (on ("crushOn", 0.15f)) { m["crushBits"] = (float) (6 + r.nextInt (6)); m["crushRate"] = (float) (1 + r.nextInt (4)); m["crushMix"] = rf (0.3f, 0.7f); }
+        if (on ("chorOn", 0.25f)) { m["chorDepth"] = rf (0.2f, 0.5f); m["chorMix"] = rf (0.2f, 0.4f); }
+    }
+    else if (cat == 4)   // Keys
+    {
+        if (on ("chorOn", 0.4f)) { m["chorDepth"] = rf (0.2f, 0.5f); m["chorMix"] = rf (0.2f, 0.4f); }
+        if (on ("tremOn", 0.25f)) { m["tremRate"] = rf (3.f, 6.f); m["tremDepth"] = rf (0.2f, 0.4f); m["tremPan"] = rf (0.f, 1.f); }
+        if (on ("dlyOn", 0.3f))  { m["dlyTime"] = pick ({ 375, 500 }); m["dlyFb"] = rf (0.2f, 0.45f); m["dlyMix"] = rf (0.1f, 0.25f); }
+        if (on ("revOn", 0.75f)) { m["revSize"] = rf (0.4f, 0.8f); m["revMix"] = rf (0.15f, 0.35f); }
+    }
     return m;
 }
 
@@ -165,10 +206,9 @@ void InfiniteProcessor::applyValues (const std::map<juce::String, float>& values
 std::map<juce::String, float> InfiniteProcessor::currentValues() const
 {
     std::map<juce::String, float> m;
-    for (const char* id : { "osc1Wave", "osc2Wave" })
-        if (auto* p = apvts.getParameter (id)) m[id] = p->convertFrom0to1 (p->getValue());
-    for (auto& f : floatParams())
-        if (auto* p = apvts.getParameter (f.id)) m[f.id] = p->convertFrom0to1 (p->getValue());
+    for (auto* p : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
+            m[rp->paramID] = rp->convertFrom0to1 (rp->getValue());
     return m;
 }
 
@@ -213,10 +253,10 @@ void InfiniteProcessor::loadFavoritesFromDisk()
         {
             Fav fav;
             fav.name = e->getStringAttribute ("name");
-            for (const char* id : { "osc1Wave", "osc2Wave" })
-                fav.values[id] = (float) e->getDoubleAttribute (id, 1.0);
-            for (auto& pi : floatParams())
-                fav.values[pi.id] = (float) e->getDoubleAttribute (pi.id, pi.def);
+            for (auto* p : getParameters())
+                if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (p))
+                    fav.values[rp->paramID] = (float) e->getDoubleAttribute (rp->paramID,
+                                                  rp->convertFrom0to1 (rp->getDefaultValue()));
             favs.push_back (std::move (fav));
         }
 }
@@ -266,6 +306,9 @@ void InfiniteProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     sr = sampleRate;
     lastAmp = { -1.f, -1.f, -1.f, -1.f };   // force la mise a jour des enveloppes
     lastFDecay = lastReso = -1.f;
+    fx.prepare (sampleRate);
+    heldCount = 0;
+    bend = 0.f;
     juce::dsp::ProcessSpec spec { sampleRate, (juce::uint32) samplesPerBlock, 1 };
     for (auto& v : voices)
     {
@@ -295,6 +338,19 @@ void InfiniteProcessor::readParams()
     P.fdecay = g ("fdecay");      P.lfoRate = g ("lfoRate"); P.lfoDepth = g ("lfoDepth");
     P.attack = g ("attack");      P.decay = g ("decay");     P.sustain = g ("sustain");
     P.release = g ("release");    P.drive = g ("drive");     P.volume = g ("volume");
+    P.mono = g ("mono") > 0.5f;   P.glide = g ("glide");
+
+    auto& s = fxs;
+    s.distOn = g ("distOn") > 0.5f;  s.distDrive = g ("distDrive"); s.distTone = g ("distTone"); s.distMix = g ("distMix");
+    s.crushOn = g ("crushOn") > 0.5f; s.crushBits = g ("crushBits"); s.crushRate = g ("crushRate"); s.crushMix = g ("crushMix");
+    s.eqOn = g ("eqOn") > 0.5f;      s.eqLow = g ("eqLow"); s.eqMid = g ("eqMid"); s.eqHigh = g ("eqHigh");
+    s.compOn = g ("compOn") > 0.5f;  s.compThresh = g ("compThresh"); s.compRatio = g ("compRatio"); s.compGain = g ("compGain");
+    s.chorOn = g ("chorOn") > 0.5f;  s.chorRate = g ("chorRate"); s.chorDepth = g ("chorDepth"); s.chorMix = g ("chorMix");
+    s.flanOn = g ("flanOn") > 0.5f;  s.flanRate = g ("flanRate"); s.flanDepth = g ("flanDepth"); s.flanFb = g ("flanFb"); s.flanMix = g ("flanMix");
+    s.phasOn = g ("phasOn") > 0.5f;  s.phasRate = g ("phasRate"); s.phasDepth = g ("phasDepth"); s.phasFb = g ("phasFb"); s.phasMix = g ("phasMix");
+    s.tremOn = g ("tremOn") > 0.5f;  s.tremRate = g ("tremRate"); s.tremDepth = g ("tremDepth"); s.tremPan = g ("tremPan");
+    s.dlyOn = g ("dlyOn") > 0.5f;    s.dlyTime = g ("dlyTime"); s.dlyFb = g ("dlyFb"); s.dlyMix = g ("dlyMix");
+    s.revOn = g ("revOn") > 0.5f;    s.revSize = g ("revSize"); s.revDamp = g ("revDamp"); s.revWidth = g ("revWidth"); s.revMix = g ("revMix");
 
     // On ne touche aux enveloppes que si un reglage a change : JUCE recalcule
     // la vitesse de release a chaque appel, ce qui pouvait figer les notes.
@@ -316,6 +372,41 @@ void InfiniteProcessor::readParams()
 
 void InfiniteProcessor::noteOn (int note, float vel)
 {
+    if (P.mono)
+    {
+        // pile des notes tenues (la plus récente gagne)
+        for (int i = 0; i < heldCount; ++i)
+            if (held[(size_t) i] == note)
+            {
+                for (int j = i; j < heldCount - 1; ++j) held[(size_t) j] = held[(size_t) (j + 1)];
+                --heldCount;
+                break;
+            }
+        if (heldCount < (int) held.size()) held[(size_t) heldCount++] = note;
+
+        auto& v = voices[0];
+        if (v.gate && v.amp.isActive())
+        {
+            // legato : on glisse vers la nouvelle note sans redémarrer l'enveloppe
+            v.note = note;
+            v.targetNote = (float) note;
+            if (P.glide < 0.001f) v.curNote = (float) note;
+            return;
+        }
+        for (size_t i = 1; i < voices.size(); ++i)
+            if (voices[i].gate) { voices[i].gate = false; voices[i].relCount = 0; voices[i].amp.noteOff(); voices[i].fenv.noteOff(); }
+
+        v.note = note;   v.vel = vel;   v.gate = true;
+        v.age = ++ageCounter;   v.samples = 0;
+        v.relCount = 0;   v.fade = 1.f;
+        v.curNote = v.targetNote = (float) note;
+        v.ph1 = v.ph2 = v.phSub = v.phMod = 0.f;
+        v.filter.reset();
+        v.amp.noteOn();
+        v.fenv.noteOn();
+        return;
+    }
+
     Voice* target = nullptr;
     for (auto& v : voices) if (! v.amp.isActive()) { target = &v; break; }
     if (target == nullptr)
@@ -326,6 +417,7 @@ void InfiniteProcessor::noteOn (int note, float vel)
     target->note = note;   target->vel = vel;   target->gate = true;
     target->age = ++ageCounter;   target->samples = 0;
     target->relCount = 0;         target->fade = 1.f;
+    target->curNote = target->targetNote = (float) note;
     target->ph1 = target->ph2 = target->phSub = target->phMod = 0.f;
     target->filter.reset();
     target->amp.noteOn();
@@ -334,6 +426,27 @@ void InfiniteProcessor::noteOn (int note, float vel)
 
 void InfiniteProcessor::noteOff (int note)
 {
+    if (P.mono)
+    {
+        for (int i = 0; i < heldCount; ++i)
+            if (held[(size_t) i] == note)
+            {
+                for (int j = i; j < heldCount - 1; ++j) held[(size_t) j] = held[(size_t) (j + 1)];
+                --heldCount;
+                break;
+            }
+
+        auto& v = voices[0];
+        if (v.gate && v.note == note && heldCount > 0)
+        {
+            // retour en glissant vers la note encore tenue
+            v.note = held[(size_t) (heldCount - 1)];
+            v.targetNote = (float) v.note;
+            if (P.glide < 0.001f) v.curNote = v.targetNote;
+            return;
+        }
+    }
+
     for (auto& v : voices)
         if (v.gate && v.note == note)
         {
@@ -357,6 +470,7 @@ void InfiniteProcessor::render (juce::AudioBuffer<float>& buffer, int start, int
     const float driveK = 1.f + P.drive * 5.f;
     const float maxFc = std::min (18000.f, fs * 0.45f);
     const float detuneRatio = std::exp2 ((P.semi + P.fine / 100.f) / 12.f);
+    const float glideCoef = P.glide > 0.001f ? 1.f - std::exp (-4.f / (P.glide * fs)) : 1.f;
 
     for (int i = 0; i < num; ++i)
     {
@@ -370,7 +484,8 @@ void InfiniteProcessor::render (juce::AudioBuffer<float>& buffer, int start, int
         {
             if (! v.amp.isActive()) continue;
 
-            const float f1 = 440.f * std::exp2 (((float) v.note - 69.f) / 12.f);
+            v.curNote += (v.targetNote - v.curNote) * glideCoef;
+            const float f1 = 440.f * std::exp2 ((v.curNote + bend - 69.f) / 12.f);
             const float f2 = f1 * detuneRatio;
             const float dt1 = f1 / fs, dt2 = f2 / fs;
 
@@ -442,10 +557,23 @@ void InfiniteProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
         const auto m = meta.getMessage();
         if (m.isNoteOn())        noteOn (m.getNoteNumber(), m.getFloatVelocity());
         else if (m.isNoteOff())  noteOff (m.getNoteNumber());
+        else if (m.isPitchWheel()) bend = (float) (m.getPitchWheelValue() - 8192) / 8192.f * 2.f;
         else if (m.isAllNotesOff() || m.isAllSoundOff())
+        {
+            heldCount = 0;
             for (auto& v : voices) if (v.gate) { v.gate = false; v.relCount = 0; v.amp.noteOff(); v.fenv.noteOff(); }
+        }
     }
     render (buffer, pos, total - pos);
+    fx.process (buffer, fxs);
+
+    // protection des oreilles : jamais au-dessus de 0 dB
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+    {
+        auto* d = buffer.getWritePointer (ch);
+        for (int i = 0; i < total; ++i)
+            d[i] = std::isfinite (d[i]) ? juce::jlimit (-1.f, 1.f, d[i]) : 0.f;
+    }
 }
 
 juce::AudioProcessorEditor* InfiniteProcessor::createEditor()

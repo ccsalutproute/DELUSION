@@ -68,6 +68,7 @@ public:
 private:
     using SliderAtt = juce::AudioProcessorValueTreeState::SliderAttachment;
     using ComboAtt  = juce::AudioProcessorValueTreeState::ComboBoxAttachment;
+    using ButtonAtt = juce::AudioProcessorValueTreeState::ButtonAttachment;
 
     struct Knob
     {
@@ -80,6 +81,7 @@ private:
     void timerCallback() override;
     void refreshFavorites();
     void showBankMenu();
+    void showPage (bool fx);
     int  currentSeed() const;
     int  currentCat() const;
     float pv (const char* id) const;
@@ -101,6 +103,18 @@ private:
     std::vector<Knob> knobs;
     std::vector<size_t> gOsc, gFilter, gAmp, gLfo, gOut;
     std::unique_ptr<ComboAtt> w1a, w2a;
+
+    // mono / glide
+    juce::TextButton monoBtn { "MONO / SLIDE" };
+    std::unique_ptr<ButtonAtt> monoAtt;
+
+    // page des effets
+    juce::TextButton synthTab { "SYNTH" }, fxTab { "FX" };
+    bool fxPage = false;
+    std::array<juce::TextButton, 10> fxBtns;
+    std::array<std::unique_ptr<ButtonAtt>, 10> fxAtts;
+    std::array<std::vector<size_t>, 10> gFx;
+    std::array<juce::Rectangle<int>, 10> pFx;
 
     juce::Rectangle<int> displayRect, pOsc, pFilter, pAmp, pLfo, pOut, osc1Label, osc2Label;
     juce::String lastTitle, lastInfo;
