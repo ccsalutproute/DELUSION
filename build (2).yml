@@ -1,0 +1,25 @@
+name: Build VST3
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: List sources
+        run: ls -la Source
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
+      - name: Build
+        run: cmake --build build --config Release --parallel
+      - name: Sign and zip
+        run: |
+          P=$(find build -type d -name "*.vst3" | head -n 1)
+          echo "Found: $P"
+          codesign --force --deep -s - "$P"
+          ditto -c -k --keepParent "$P" Delusion-VST3-mac.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Delusion-VST3-mac
+          path: Delusion-VST3-mac.zip
