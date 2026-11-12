@@ -354,7 +354,7 @@ InfiniteEditor::InfiniteEditor (InfiniteProcessor& p)
     setLookAndFeel (&lnf);
 
     // ---- catégories ----
-    static const char* catNames[] = { "Lead", "Pad", "Pluck", "Keys", "All" };
+    static const char* catNames[] = { "Lead", "Pad", "Pluck", "Keys", "Piano", "E-Piano", "Brass", "Guitar", "Strings", "Winds", "All" };
     for (size_t i = 0; i < catButtons.size(); ++i)
     {
         auto& b = catButtons[i];
@@ -364,7 +364,7 @@ InfiniteEditor::InfiniteEditor (InfiniteProcessor& p)
         b.onClick = [this, i] { if (catButtons[i].getToggleState()) proc.loadSeed ((int) i + 1, 1); };
         addAndMakeVisible (b);
     }
-    catButtons[(size_t) (juce::jlimit (1, 5, currentCat()) - 1)].setToggleState (true, juce::dontSendNotification);
+    catButtons[(size_t) (juce::jlimit (1, 11, currentCat()) - 1)].setToggleState (true, juce::dontSendNotification);
 
     // ---- pages ----
     static const char* tabNames[] = { "Synth", "Mod", "FX" };
@@ -430,6 +430,9 @@ InfiniteEditor::InfiniteEditor (InfiniteProcessor& p)
     addKnob ("noise",    "Noise", gOsc, 0);
     addKnob ("fmAmt",    "FM", gOsc, 0);
     addKnob ("fmRatio",  "FM Ratio", gOsc, 0);
+
+    addCombo (engine, "engine", 0);
+    for (int i = 1; i <= 4; ++i) addKnob ("inst" + juce::String (i), "Macro", gInst, 0);
 
     addKnob ("cutoff",   "Cutoff", gFilter, 0);
     addKnob ("reso",     "Reso", gFilter, 0);
@@ -567,6 +570,8 @@ void InfiniteEditor::showPage (int pg)
     for (int i = 0; i < 3; ++i)
         for (auto* c : pageComps[(size_t) i])
             c->setVisible (i == page);
+    shownEngine = -1;
+    if (! gInst.empty()) updateEngineView();
     if (! pageTabs[(size_t) page].getToggleState())
         pageTabs[(size_t) page].setToggleState (true, juce::dontSendNotification);
     repaint();
@@ -584,7 +589,7 @@ void InfiniteEditor::showBankMenu()
     menu.addSectionHeader ("BANKS");
 
     const int curCat = currentCat(), curSeed = currentSeed();
-    for (int cat = 1; cat <= 4; ++cat)
+    for (int cat = 1; cat <= InfiniteProcessor::kNumCats; ++cat)
     {
         juce::PopupMenu sub;
         for (int s = 1; s <= InfiniteProcessor::kBankSize; ++s)
@@ -630,17 +635,78 @@ void InfiniteEditor::timerCallback()
         repaint (displayRect);
     }
 
-    const size_t c = (size_t) (juce::jlimit (1, 5, currentCat()) - 1);
+    const size_t c = (size_t) (juce::jlimit (1, 11, currentCat()) - 1);
     if (! catButtons[c].getToggleState())
         catButtons[c].setToggleState (true, juce::dontSendNotification);
+
+    if ((int) pv ("engine") != shownEngine) updateEngineView();
 
     for (auto* d : { &scope, &filterD, &ampD, &uniD, &driveD, &env2D, &env3D, &lfoD })
         if (d->isVisible()) d->repaint();
 }
 
+void InfiniteEditor::updateEngineView()
+{
+    shownEngine = (int) pv ("engine");
+    const bool synth = shownEngine == inst::Synth;
+    const bool p0 = page == 0;
+    for (auto* c : std::initializer_list<juce::Component*> { w1.box.get(), w2.box.get(), warp1.box.get(), warp2.box.get() })
+        c->setVisible (p0 && synth);
+    for (auto i : gOsc)  knobs[i].slider->setVisible (p0 && synth);
+    auto names = inst::macroNames (shownEngine);
+    for (size_t j = 0; j < gInst.size(); ++j)
+    {
+        knobs[gInst[j]].slider->setVisible (p0 && ! synth);
+        knobs[gInst[j]].name = names[(int) j];
+    }
+    repaint();
+}
+
+void InfiniteEditor::paintOverChildren (juce::Graphics& g)
+{
+    // l'unison ne s'applique qu'au moteur Synth : on l'assombrit pour les instruments
+    if (page == 0 && shownEngine != inst::Synth && ! pUni.isEmpty())
+    {
+        g.setColour (ui::bg2().withAlpha (0.72f));
+        g.fillRect (pUni.reduced (1));
+        g.setColour (ui::mute());
+        g.setFont (juce::Font (juce::FontOptions (11.f, juce::Font::bold)).withExtraKerningFactor (0.25f));
+        g.drawText ("SYNTH ENGINE ONLY", pUni, juce::Justification::centred);
+    }
+}
+
 // ------------------------------------------------------------------ dessin des écrans
 void InfiniteEditor::paintScope (juce::Graphics& g, juce::Rectangle<float> r)
 {
+    const int eng = (int) pv ("engine");
+    if (eng != inst::Synth)
+    {
+        // spectre approximatif de l'instrument : barres d'harmoniques
+        const float tone = pv ("inst1"), ch = pv ("inst2");
+        const int n = 24;
+        const float bw = r.getWidth() / (float) n;
+        for (int i = 1; i <= n; ++i)
+        {
+            float a;
+            switch (eng)
+            {
+                case inst::Piano:   a = std::pow ((float) i, -(2.3f - 1.4f * tone)) * (0.4f + 0.6f * std::abs (std::sin (3.1416f * (float) i / 8.3f))); break;
+                case inst::EPiano:  a = (i == 1 ? 1.f : 0.35f * ch / (float) i) + (i == 14 ? tone * 0.6f : 0.f); break;
+                case inst::Brass:   a = std::pow ((float) i, -(1.6f - 1.1f * tone)); break;
+                case inst::Plucked: a = std::pow ((float) i, -(1.8f - 1.2f * tone)) * (0.3f + 0.7f * std::abs (std::sin (3.1416f * (float) i * (0.06f + 0.4f * pv ("inst4"))))); break;
+                case inst::Strings: a = std::pow ((float) i, -(1.4f - 0.8f * tone)); break;
+                case inst::Flute:   a = i == 1 ? 1.f : (i == 2 ? 0.1f + 0.35f * ch : (i == 3 ? 0.12f * ch : 0.02f * tone)); break;
+                default:            a = std::pow ((float) i, -1.f) * (0.4f + 0.6f * std::abs (std::sin ((float) i * 0.9f + tone * 3.f))); break;
+            }
+            a = juce::jlimit (0.f, 1.f, a);
+            const float h = std::pow (a, 0.5f) * r.getHeight() * 0.92f;
+            const float x = r.getX() + (float) (i - 1) * bw;
+            g.setGradientFill (juce::ColourGradient (juce::Colours::white, 0.f, r.getBottom() - h, ui::accent().withAlpha (0.4f), 0.f, r.getBottom(), false));
+            g.fillRect (x + bw * 0.2f, r.getBottom() - h, bw * 0.6f, h);
+        }
+        return;
+    }
+
     const int w1v = (int) pv ("osc1Wave"), w2v = (int) pv ("osc2Wave");
     const int m1 = (int) pv ("warp1Mode"), m2 = (int) pv ("warp2Mode");
     const float a1 = pv ("warp1Amt"), a2 = pv ("warp2Amt");
@@ -1079,7 +1145,7 @@ void InfiniteEditor::paint (juce::Graphics& g)
 
     if (page == 0)
     {
-        drawPanel (pOsc, "OSCILLATORS");
+        drawPanel (pOsc, shownEngine > 0 ? "INSTRUMENT" : "OSCILLATORS");
         drawPanel (pFilter, "FILTER");
         drawPanel (pAmp, "ENV 1  /  AMP");
         drawPanel (pUni, "UNISON");
@@ -1105,8 +1171,25 @@ void InfiniteEditor::paint (juce::Graphics& g)
 
     if (page == 0)
     {
-        g.drawText ("OSC 1", osc1Label, juce::Justification::centredLeft);
-        g.drawText ("OSC 2", osc2Label, juce::Justification::centredLeft);
+        if (shownEngine <= 0)
+        {
+            g.drawText ("OSC 1", osc1Label, juce::Justification::centredLeft);
+            g.drawText ("OSC 2", osc2Label, juce::Justification::centredLeft);
+        }
+        else
+        {
+            // nom de l'instrument en grand à droite de l'écran
+            auto area = juce::Rectangle<int> (pOsc.getX() + 322, pOsc.getY() + 36, 268, 96);
+            g.setColour (ui::ink());
+            g.setFont (juce::Font (juce::FontOptions (24.f, juce::Font::bold)).withExtraKerningFactor (0.12f));
+            g.drawFittedText (inst::engineNames()[shownEngine].toUpperCase(), area.removeFromTop (40), juce::Justification::centred, 1);
+            g.setColour (ui::violet());
+            g.setFont (juce::Font (juce::FontOptions (10.f, juce::Font::bold)).withExtraKerningFactor (0.3f));
+            g.drawFittedText ("PHYSICAL MODEL", area.removeFromTop (18), juce::Justification::centred, 1);
+            g.setColour (ui::mute());
+            g.drawFittedText ("4 MACROS BELOW  -  FILTER / ENV / FX STILL ACTIVE", area.removeFromTop (30), juce::Justification::centred, 2);
+            g.setColour (ui::mute());
+        }
     }
     else if (page == 1)
     {
@@ -1136,9 +1219,9 @@ void InfiniteEditor::resized()
     saveBtn.setBounds (852, 12, 136, 34);
     favorites.setBounds (708, 50, 280, 34);
     for (size_t i = 0; i < catButtons.size(); ++i)
-        catButtons[i].setBounds (16 + (int) i * 106, 96, 100, 28);
+        catButtons[i].setBounds (14 + (int) i * 61, 96, 58, 28);
     for (size_t i = 0; i < pageTabs.size(); ++i)
-        pageTabs[i].setBounds (690 + (int) i * 100, 96, 96, 28);
+        pageTabs[i].setBounds (696 + (int) i * 98, 96, 94, 28);
 
     auto layoutKnobs = [this] (const std::vector<size_t>& idx, juce::Rectangle<int> area)
     {
@@ -1171,6 +1254,8 @@ void InfiniteEditor::resized()
         warp2.box->setBounds (x + 160, pOsc.getY() + 84, 108, 26);
     }
     layoutKnobs (gOsc, { pOsc.getX() + 8, pOsc.getY() + 140, pOsc.getWidth() - 16, 102 });
+    layoutKnobs (gInst, { pOsc.getX() + 40, pOsc.getY() + 140, pOsc.getWidth() - 80, 102 });
+    engine.box->setBounds (pOsc.getRight() - 140, pOsc.getY() + 1, 134, 20);
 
     filterD.setBounds (pFilter.getX() + 10, pFilter.getY() + 32, 344, 98);
     filtType.box->setBounds (pFilter.getRight() - 104, pFilter.getY() + 1, 98, 20);

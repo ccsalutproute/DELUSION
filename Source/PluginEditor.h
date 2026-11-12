@@ -154,6 +154,8 @@ private:
     void refreshFavorites();
     void showBankMenu();
     void showPage (int page);
+    void updateEngineView();
+    void paintOverChildren (juce::Graphics&) override;
     void bindLfo (int index);
     int  currentSeed() const;
     int  currentCat() const;
@@ -180,7 +182,7 @@ private:
     int page = 0;
 
     // en-tête
-    std::array<juce::TextButton, 5> catButtons;      // Lead, Pad, Pluck, Keys, All
+    std::array<juce::TextButton, 11> catButtons;     // 10 banques + All
     std::array<juce::TextButton, 3> pageTabs;        // SYNTH, MOD, FX
     juce::TextButton prevBtn { "<" }, nextBtn { ">" }, genBtn { "Generate" }, saveBtn { "Save" };
     juce::ComboBox favorites;
@@ -190,7 +192,9 @@ private:
 
     // potards
     std::vector<Knob> knobs;
-    std::vector<size_t> gOsc, gFilter, gAmp, gUni, gOut, gEnv2, gEnv3;
+    std::vector<size_t> gOsc, gFilter, gAmp, gUni, gOut, gEnv2, gEnv3, gInst;
+    Combo engine;
+    int shownEngine = -1;
 
     // listes et interrupteurs fixes
     Combo w1, w2, warp1, warp2, filtType;

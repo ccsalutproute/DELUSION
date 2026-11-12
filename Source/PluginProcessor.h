@@ -5,6 +5,7 @@
 #include <map>
 #include <vector>
 #include "Effects.h"
+#include "Instruments.h"
 
 struct ParamInfo { juce::String id; juce::String name; float lo, hi, def, step, centre; };
 
@@ -62,6 +63,10 @@ inline const std::vector<ParamInfo>& floatParams()
             { "drive",     "Drive",              0.f,   1.f,   0.2f,  0.01f,  0.f },
             { "volume",    "Volume",           -24.f,   6.f,  -6.f,   0.1f,   0.f },
             { "glide",     "Glide",              0.f,   1.f,   0.f,   0.001f, 0.12f },
+            { "inst1",     "Instrument 1",       0.f,   1.f,   0.5f,  0.001f, 0.f },
+            { "inst2",     "Instrument 2",       0.f,   1.f,   0.5f,  0.001f, 0.f },
+            { "inst3",     "Instrument 3",       0.f,   1.f,   0.5f,  0.001f, 0.f },
+            { "inst4",     "Instrument 4",       0.f,   1.f,   0.5f,  0.001f, 0.f },
 
             // effets
             { "distDrive", "Dist drive",         0.f,   1.f,   0.5f,  0.01f,  0.f },
@@ -117,7 +122,8 @@ inline const std::vector<ChoiceInfo>& choiceParams()
             { "osc2Wave", "Osc2 Wave", lists::waves(), 1 },
             { "warp1Mode", "Warp 1 Mode", lists::warps(), 0 },
             { "warp2Mode", "Warp 2 Mode", lists::warps(), 0 },
-            { "filtType", "Filter Type", lists::filters(), 0 }
+            { "filtType", "Filter Type", lists::filters(), 0 },
+            { "engine", "Engine", inst::engineNames(), 0 }
         };
         for (int i = 1; i <= lists::numLfos; ++i)
         {
@@ -182,7 +188,8 @@ public:
     void setStateInformation (const void* data, int sizeInBytes) override;
 
     // ---- Banque infinie + favoris (thread de l'interface uniquement) ----
-    // catSel : 1 Lead, 2 Pad, 3 Pluck, 4 Keys, 5 Tout
+    // catSel : 1 Lead 2 Pad 3 Pluck 4 Keys 5 Piano 6 E-Piano 7 Brass 8 Plucked 9 Strings 10 Winds 11 Tout
+    static constexpr int kNumCats = 10, kAllCat = 11;
     static constexpr int kBankSize = 64;
     static juce::String presetName (int cat, int seed) { return makeName (cat, seed); }
     static juce::String catName (int cat);
@@ -215,8 +222,9 @@ private:
     struct Voice
     {
         int note = -1, samples = 0, relCount = 0;
-        bool gate = false;
+        bool gate = false, sustained = false;
         float vel = 0.f, rnd = 0.f, fade = 1.f;
+        inst::Voice iv;
         unsigned int age = 0;
         float curNote = 60.f, targetNote = 60.f;
         std::array<float, kMaxUni> ph1 {}, ph2 {};
@@ -237,6 +245,8 @@ private:
         float attack = 0.005f, decay = 0.5f, sustain = 0.7f, release = 0.3f, drive = 0, volume = -6;
         bool mono = false;
         float glide = 0.f;
+        int engine = 0;
+        std::array<float, 4> macro {};
         std::array<int, lists::numLfos> lfoShape {};
         std::array<float, lists::numLfos> lfoHz {};
         std::array<bool, lists::numLfos> lfoRetrig {};
@@ -250,7 +260,9 @@ private:
     void noteOff (int note);
     float lfoValue (LfoState& s, int shape, float inc);
 
-    std::array<Voice, 8> voices;
+    std::array<Voice, 16> voices;
+    bool pedal = false;
+    float cutS = 2000.f, gainS = 0.5f, driveS = 0.f;   // valeurs lissées (pas de craquements)
     std::vector<Fav> favs;
     juce::Random rng;
     double sr = 44100.0;

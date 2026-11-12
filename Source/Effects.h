@@ -32,16 +32,16 @@ public:
         ph = 0.f;
     }
 
-    void process (float* L, float* R, int n, float rate, float centreMs, float depthMs, float fb, float mix)
+    // taps > 1 : plusieurs voix de chorus décalées (son plus large et plus riche)
+    void process (float* L, float* R, int n, float rate, float centreMs, float depthMs, float fb, float mix, int taps = 1)
     {
+        taps = juce::jlimit (1, 4, taps);
         auto* bl = buf.getWritePointer (0);
         auto* br = buf.getWritePointer (1);
         const float twoPi = juce::MathConstants<float>::twoPi;
 
         for (int i = 0; i < n; ++i)
         {
-            const float lfoL = std::sin (twoPi * ph);
-            const float lfoR = std::sin (twoPi * (ph + 0.25f));
             ph += rate / fs;
             if (ph >= 1.f) ph -= 1.f;
 
@@ -49,18 +49,23 @@ public:
             {
                 float* b = ch == 0 ? bl : br;
                 float* io = ch == 0 ? L : R;
-                const float lfo = ch == 0 ? lfoL : lfoR;
 
-                float d = (centreMs + depthMs * lfo) * 0.001f * fs;
-                d = juce::jlimit (1.f, (float) (size - 3), d);
-                float rp = (float) w - d;
-                if (rp < 0.f) rp += (float) size;
-                int i0 = (int) rp;
-                const float frac = rp - (float) i0;
-                if (i0 >= size) i0 -= size;
-                int i1 = i0 + 1;
-                if (i1 >= size) i1 = 0;
-                const float y = b[i0] + frac * (b[i1] - b[i0]);
+                float y = 0.f;
+                for (int t = 0; t < taps; ++t)
+                {
+                    const float lfo = std::sin (twoPi * (ph + (float) t / (float) taps + (ch == 0 ? 0.f : 0.25f)));
+                    float d = (centreMs * (1.f + 0.18f * (float) t) + depthMs * lfo) * 0.001f * fs;
+                    d = juce::jlimit (1.f, (float) (size - 3), d);
+                    float rp = (float) w - d;
+                    if (rp < 0.f) rp += (float) size;
+                    int i0 = (int) rp;
+                    const float frac = rp - (float) i0;
+                    if (i0 >= size) i0 -= size;
+                    int i1 = i0 + 1;
+                    if (i1 >= size) i1 = 0;
+                    y += b[i0] + frac * (b[i1] - b[i0]);
+                }
+                y /= (float) taps;
 
                 const float x = io[i];
                 b[w] = x + y * fb;
@@ -75,6 +80,116 @@ private:
     juce::AudioBuffer<float> buf;
     float fs = 44100.f, ph = 0.f;
     int size = 8, w = 0;
+};
+
+// Reverb à réseau de retards (FDN 8 lignes) : dense, douce, modulée, stéréo
+class FdnReverb
+{
+public:
+    void prepare (double sampleRate)
+    {
+        fs = (float) sampleRate;
+        const int maxLen = (int) (0.16f * fs) + 8;
+        for (auto& l : lines) { l.assign ((size_t) maxLen, 0.f); }
+        for (size_t i = 0; i < ap.size(); ++i) ap[i].assign ((size_t) ((float) apMs[i] * 0.001f * fs) + 4, 0.f);
+        pre.assign ((size_t) (0.06f * fs) + 4, 0.f);
+        reset();
+    }
+
+    void reset()
+    {
+        for (auto& l : lines) std::fill (l.begin(), l.end(), 0.f);
+        for (auto& a : ap) std::fill (a.begin(), a.end(), 0.f);
+        std::fill (pre.begin(), pre.end(), 0.f);
+        w = 0; preW = 0; apW.fill (0); lp.fill (0.f); hp = 0.f; modPh = 0.f;
+    }
+
+    void process (float* L, float* R, int n, float size, float damp, float width, float mix)
+    {
+        const float scale = 0.45f + size * 1.25f;
+        const float rt = 0.35f + size * size * 7.5f;
+        const float c = 0.08f + 0.85f * (1.f - damp);
+        const int maxLen = (int) lines[0].size();
+        std::array<float, 8> len {}, g {};
+        for (int i = 0; i < 8; ++i)
+        {
+            len[(size_t) i] = juce::jlimit (8.f, (float) maxLen - 4.f, baseMs[i] * 0.001f * fs * scale);
+            g[(size_t) i] = std::pow (10.f, -3.f * len[(size_t) i] / (rt * fs));
+        }
+        const int preLen = juce::jlimit (1, (int) pre.size() - 1, (int) ((0.005f + 0.03f * size) * fs));
+        const float twoPi = juce::MathConstants<float>::twoPi;
+
+        for (int s = 0; s < n; ++s)
+        {
+            // entrée mono, coupe-bas, pré-délai
+            float in = 0.5f * (L[s] + R[s]);
+            hp += 0.01f * (in - hp);
+            in -= hp;
+            pre[(size_t) preW] = in;
+            int pr = preW - preLen; if (pr < 0) pr += (int) pre.size();
+            in = pre[(size_t) pr];
+            if (++preW >= (int) pre.size()) preW = 0;
+
+            // diffusion : 4 passe-tout en série
+            for (size_t a = 0; a < ap.size(); ++a)
+            {
+                auto& buf = ap[a];
+                const int sz = (int) buf.size() - 1;
+                int rp = apW[a] - sz + 1; if (rp < 0) rp += (int) buf.size();
+                const float d = buf[(size_t) rp];
+                const float v = in + 0.6f * d;
+                buf[(size_t) apW[a]] = v;
+                in = d - 0.6f * v;
+                if (++apW[a] >= (int) buf.size()) apW[a] = 0;
+            }
+
+            // lecture des 8 lignes (deux sont modulées)
+            modPh += 0.6f / fs; if (modPh >= 1.f) modPh -= 1.f;
+            std::array<float, 8> y {};
+            for (int i = 0; i < 8; ++i)
+            {
+                float d = len[(size_t) i];
+                if (i == 1) d += 12.f * std::sin (twoPi * modPh);
+                if (i == 5) d += 12.f * std::sin (twoPi * (modPh + 0.33f));
+                float rp = (float) w - d;
+                while (rp < 0.f) rp += (float) maxLen;
+                int i0 = (int) rp;
+                const float fr = rp - (float) i0;
+                if (i0 >= maxLen) i0 -= maxLen;
+                const int i1 = i0 + 1 >= maxLen ? 0 : i0 + 1;
+                const auto& l = lines[(size_t) i];
+                float v = l[(size_t) i0] + fr * (l[(size_t) i1] - l[(size_t) i0]);
+                lp[(size_t) i] += c * (v - lp[(size_t) i]);
+                y[(size_t) i] = lp[(size_t) i] * g[(size_t) i];
+            }
+
+            // matrice de Householder (mélange sans perte)
+            float sum = 0.f;
+            for (auto v : y) sum += v;
+            sum *= 0.25f;
+            for (int i = 0; i < 8; ++i)
+                lines[(size_t) i][(size_t) w] = (y[(size_t) i] - sum) + in * ((i & 1) ? -0.35f : 0.35f);
+            if (++w >= maxLen) w = 0;
+
+            const float outL = (y[0] + y[2] + y[4] + y[6]) * 0.35f;
+            const float outR = (y[1] + y[3] + y[5] + y[7]) * 0.35f;
+            const float mid = 0.5f * (outL + outR), side = 0.5f * (outL - outR) * width;
+            L[s] = L[s] * (1.f - mix * 0.5f) + (mid + side) * mix;
+            R[s] = R[s] * (1.f - mix * 0.5f) + (mid - side) * mix;
+        }
+    }
+
+private:
+    static constexpr float baseMs[8] = { 29.7f, 37.1f, 41.1f, 43.7f, 53.3f, 59.9f, 67.7f, 73.1f };
+    static constexpr int apMs[4] = { 5, 7, 11, 13 };
+    float fs = 44100.f;
+    std::array<std::vector<float>, 8> lines;
+    std::array<std::vector<float>, 4> ap;
+    std::vector<float> pre;
+    std::array<int, 4> apW {};
+    std::array<float, 8> lp {};
+    int w = 0, preW = 0;
+    float hp = 0.f, modPh = 0.f;
 };
 
 class FxChain
@@ -100,13 +215,14 @@ public:
         dlyW = 0;
         dlySmooth = 375.f * 0.001f * fs;
 
-        reverb.setSampleRate (sampleRate);
-        reverb.reset();
+        reverb.prepare (sampleRate);
+        oversampler.initProcessing ((size_t) kChunk);
+        oversampler.reset();
 
         for (auto& f : eq) { f.reset(); }
         lastLow = lastMid = lastHigh = 1000.f;   // force le calcul des filtres
 
-        distLpL = distLpR = dlyLpL = dlyLpR = 0.f;
+        distLpL = distLpR = dlyLpL = dlyLpR = dlyHpL = dlyHpR = 0.f;
         crushHoldL = crushHoldR = 0.f;
         crushCount = 0;
         tremPh = 0.f;
@@ -133,21 +249,28 @@ private:
     {
         const float twoPi = juce::MathConstants<float>::twoPi;
 
-        // 1. Distortion
+        // 1. Distortion (suréchantillonnée x4 : pas de grésillement numérique)
         if (s.distOn)
         {
             const float k = 1.f + s.distDrive * 24.f;
             const float norm = 1.f / std::tanh (k);
-            const float a = 1.f - std::exp (-twoPi * s.distTone / fs);
-            for (int i = 0; i < n; ++i)
+            const float a = 1.f - std::exp (-twoPi * s.distTone / (fs * 4.f));
+            float* chans[] = { L, R };
+            juce::dsp::AudioBlock<float> block (chans, 2, (size_t) n);
+            auto up = oversampler.processSamplesUp (block);
+            for (size_t ch = 0; ch < 2; ++ch)
             {
-                const float wl = std::tanh (L[i] * k) * norm;
-                const float wr = std::tanh (R[i] * k) * norm;
-                distLpL += a * (wl - distLpL);
-                distLpR += a * (wr - distLpR);
-                L[i] += s.distMix * (distLpL - L[i]);
-                R[i] += s.distMix * (distLpR - R[i]);
+                auto* d = up.getChannelPointer (ch);
+                float& st = ch == 0 ? distLpL : distLpR;
+                for (size_t i = 0; i < up.getNumSamples(); ++i)
+                {
+                    const float x = d[i];
+                    const float wv = std::tanh (x * k) * norm;
+                    st += a * (wv - st);
+                    d[i] = x + s.distMix * (st - x);
+                }
             }
+            oversampler.processSamplesDown (block);
         }
 
         // 2. Bitcrusher
@@ -199,7 +322,7 @@ private:
 
         // 5. Chorus
         if (s.chorOn)
-            chorus.process (L, R, n, s.chorRate, 14.f, 1.f + s.chorDepth * 9.f, 0.1f, s.chorMix);
+            chorus.process (L, R, n, s.chorRate, 12.f, 1.f + s.chorDepth * 8.f, 0.05f, s.chorMix, 3);
 
         // 6. Flanger
         if (s.flanOn)
@@ -257,10 +380,13 @@ private:
                 const float yr = br[i0] + frac * (br[i1] - br[i0]);
                 dlyLpL += a * (yl - dlyLpL);
                 dlyLpR += a * (yr - dlyLpR);
+                // coupe-bas dans la boucle : les répétitions restent claires
+                dlyHpL += 0.015f * (dlyLpL - dlyHpL);
+                dlyHpR += 0.015f * (dlyLpR - dlyHpR);
 
                 const float in = 0.5f * (L[i] + R[i]);
-                bl[dlyW] = in + dlyLpR * s.dlyFb;   // gauche -> droite -> gauche
-                br[dlyW] = dlyLpL * s.dlyFb;
+                bl[dlyW] = in + (dlyLpR - dlyHpR) * s.dlyFb;   // gauche -> droite -> gauche
+                br[dlyW] = (dlyLpL - dlyHpL) * s.dlyFb;
 
                 L[i] += s.dlyMix * yl;
                 R[i] += s.dlyMix * yr;
@@ -271,15 +397,7 @@ private:
         // 10. Reverb
         if (s.revOn)
         {
-            juce::Reverb::Parameters p;
-            p.roomSize = s.revSize;
-            p.damping = s.revDamp;
-            p.width = s.revWidth;
-            p.wetLevel = s.revMix;
-            p.dryLevel = 1.f - s.revMix * 0.5f;
-            p.freezeMode = 0.f;
-            reverb.setParameters (p);
-            reverb.processStereo (L, R, n);
+            reverb.process (L, R, n, s.revSize, s.revDamp, s.revWidth, s.revMix);
         }
     }
 
@@ -311,13 +429,14 @@ private:
     juce::dsp::Compressor<float> comp;
     juce::dsp::Phaser<float> phaser;
     ModDelay chorus, flanger;
-    juce::Reverb reverb;
+    FdnReverb reverb;
+    juce::dsp::Oversampling<float> oversampler { 2, 2, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true };
     std::array<juce::dsp::IIR::Filter<float>, 6> eq;
     float lastLow = 1000.f, lastMid = 1000.f, lastHigh = 1000.f;
 
     juce::AudioBuffer<float> dly;
     int dlySize = 8, dlyW = 0;
-    float dlySmooth = 1000.f, dlyLpL = 0.f, dlyLpR = 0.f;
+    float dlySmooth = 1000.f, dlyLpL = 0.f, dlyLpR = 0.f, dlyHpL = 0.f, dlyHpR = 0.f;
 
     float distLpL = 0.f, distLpR = 0.f;
     float crushHoldL = 0.f, crushHoldR = 0.f;

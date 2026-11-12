@@ -7,9 +7,9 @@ using APC = juce::AudioParameterChoice;
 using APB = juce::AudioParameterBool;
 using PID = juce::ParameterID;
 
-static const char* kCats[] = { "Bass", "Lead", "Pad", "Pluck", "Keys" };
+static const char* kCats[] = { "Bass", "Lead", "Pad", "Pluck", "Keys", "Piano", "E-Piano", "Brass", "Plucked", "Strings", "Winds" };
 
-juce::String InfiniteProcessor::catName (int cat) { return kCats[juce::jlimit (1, 4, cat)]; }
+juce::String InfiniteProcessor::catName (int cat) { return kCats[juce::jlimit (1, kNumCats, cat)]; }
 
 // index des sources / cibles de modulation
 enum Src { sOff, sEnv2, sEnv3, sLfo1, sLfo2, sLfo3, sLfo4, sVel, sWheel, sNote, sRand, sCount };
@@ -113,6 +113,7 @@ std::map<juce::String, float> InfiniteProcessor::makePatch (int cat, int seed)
     for (auto& c : choiceParams()) m[c.id] = (float) c.def;
     for (auto& b : boolParams())   m[b.first] = 0.f;
     m["volume"] = -6.f;
+    if (cat >= 5) { m["filtType"] = 0.f; m["reso"] = 0.7f; m["envAmt"] = 0.f; m["keyTrack"] = 0.f; m["drive"] = 0.05f; m["osc2Mix"] = 0.f; }
 
     int slot = 0;
     auto mod = [&] (int src, int dst, float amt)
@@ -225,7 +226,7 @@ std::map<juce::String, float> InfiniteProcessor::makePatch (int cat, int seed)
             mod (sWheel, dWarp1, 0.5f);
             break;
 
-        default: // Keys / cloches
+        case 4: // Keys / cloches
             m["osc1Wave"] = pick ({ 0, 3 });         m["osc2Wave"] = 0.f;
             m["osc2Semi"] = pick ({ 0, 12, 19, 24 }); m["osc2Fine"] = rf (-8, 8);
             m["osc2Mix"]  = rf (0.2f, 0.6f);
@@ -244,6 +245,102 @@ std::map<juce::String, float> InfiniteProcessor::makePatch (int cat, int seed)
             if (chance (0.3f)) { lfo (2, 0, rf (4.f, 6.f)); mod (sLfo2, dPitch, rf (0.002f, 0.006f)); }
             mod (sVel, dFm, rf (0.1f, 0.3f));
             mod (sWheel, dAmp, -0.4f);
+            break;
+
+        case 5: // Piano
+        {
+            m["engine"] = (float) inst::Piano;
+            const bool felt = chance (0.3f);                     // piano feutré "lo-fi"
+            m["inst1"] = felt ? rf (0.05f, 0.3f) : rf (0.35f, 0.85f);
+            m["inst2"] = rf (0.05f, 0.45f);
+            m["inst3"] = rf (0.45f, 0.9f);
+            m["inst4"] = felt ? rf (0.05f, 0.2f) : rf (0.2f, 0.6f);
+            m["cutoff"] = felt ? rl (2500, 6000) : rl (9000, 16000);
+            m["attack"] = 0.001f; m["decay"] = 3.f; m["sustain"] = 1.f; m["release"] = rf (0.25f, 0.6f);
+            mod (sVel, dCutoff, rf (0.05f, 0.15f));
+            m["revOn"] = 1.f; m["revSize"] = felt ? rf (0.6f, 0.9f) : rf (0.45f, 0.75f); m["revMix"] = rf (0.15f, 0.32f); m["revDamp"] = rf (0.4f, 0.7f);
+            if (chance (0.2f)) { m["chorOn"] = 1.f; m["chorDepth"] = rf (0.1f, 0.3f); m["chorMix"] = rf (0.1f, 0.25f); }
+            if (felt && chance (0.5f)) { m["crushOn"] = 1.f; m["crushBits"] = (float) (10 + r.nextInt (4)); m["crushRate"] = 1.f; m["crushMix"] = rf (0.2f, 0.4f); }
+            if (chance (0.25f)) { m["dlyOn"] = 1.f; m["dlyTime"] = pick ({ 375, 500 }); m["dlyFb"] = rf (0.2f, 0.4f); m["dlyMix"] = rf (0.08f, 0.2f); }
+            break;
+        }
+
+        case 6: // E-Piano
+            m["engine"] = (float) inst::EPiano;
+            m["inst1"] = rf (0.1f, 0.7f);  m["inst2"] = rf (0.1f, 0.6f);  m["inst3"] = rf (0.3f, 0.8f);
+            m["inst4"] = chance (0.7f) ? rf (0.f, 0.25f) : rf (0.6f, 1.f);
+            m["cutoff"] = rl (5000, 14000);
+            m["attack"] = 0.001f; m["decay"] = 3.f; m["sustain"] = 1.f; m["release"] = rf (0.25f, 0.6f);
+            mod (sVel, dCutoff, rf (0.08f, 0.2f));
+            if (chance (0.5f)) { m["tremOn"] = 1.f; m["tremRate"] = rf (3.5f, 6.f); m["tremDepth"] = rf (0.25f, 0.5f); m["tremPan"] = 1.f; }
+            if (chance (0.4f)) { m["chorOn"] = 1.f; m["chorDepth"] = rf (0.2f, 0.5f); m["chorMix"] = rf (0.2f, 0.4f); }
+            if (chance (0.15f)) { m["phasOn"] = 1.f; m["phasRate"] = rl (0.1f, 0.6f); m["phasMix"] = rf (0.2f, 0.45f); }
+            m["revOn"] = chance (0.75f) ? 1.f : 0.f; m["revSize"] = rf (0.4f, 0.75f); m["revMix"] = rf (0.12f, 0.3f);
+            break;
+
+        case 7: // Brass
+            m["engine"] = (float) inst::Brass;
+            m["inst1"] = rf (0.3f, 0.9f);  m["inst2"] = rf (0.f, 0.45f);  m["inst3"] = rf (0.1f, 0.6f);
+            m["inst4"] = chance (0.5f) ? 0.f : rf (0.5f, 1.f);
+            m["cutoff"] = 16000.f;
+            m["attack"] = rf (0.008f, 0.03f); m["decay"] = 1.f; m["sustain"] = 0.9f; m["release"] = rf (0.1f, 0.3f);
+            if (m["inst4"] < 0.1f && chance (0.5f)) { m["mono"] = 1.f; m["glide"] = rf (0.02f, 0.06f); }
+            mod (sVel, dCutoff, rf (0.1f, 0.2f));
+            mod (sWheel, dPitch, 0.01f);
+            m["revOn"] = 1.f; m["revSize"] = rf (0.5f, 0.85f); m["revMix"] = rf (0.15f, 0.3f);
+            if (chance (0.3f)) { m["dlyOn"] = 1.f; m["dlyTime"] = pick ({ 250, 375 }); m["dlyFb"] = rf (0.15f, 0.35f); m["dlyMix"] = rf (0.08f, 0.18f); }
+            break;
+
+        case 8: // Cordes pincées : guitare, harpe, kalimba
+            m["engine"] = (float) inst::Plucked;
+            m["inst1"] = rf (0.3f, 0.9f);
+            m["inst2"] = pick ({ rf (0.f, 0.25f), rf (0.4f, 0.6f), rf (0.8f, 1.f) });
+            m["inst3"] = rf (0.3f, 0.85f);  m["inst4"] = rf (0.1f, 0.6f);
+            m["cutoff"] = rl (6000, 16000);
+            m["attack"] = 0.001f; m["decay"] = 3.f; m["sustain"] = 1.f; m["release"] = rf (0.2f, 0.5f);
+            mod (sVel, dCutoff, rf (0.05f, 0.15f));
+            if (chance (0.5f)) { m["dlyOn"] = 1.f; m["dlyTime"] = pick ({ 250, 375, 500 }); m["dlyFb"] = rf (0.2f, 0.45f); m["dlyMix"] = rf (0.1f, 0.25f); }
+            m["revOn"] = chance (0.75f) ? 1.f : 0.f; m["revSize"] = rf (0.4f, 0.8f); m["revMix"] = rf (0.12f, 0.3f);
+            if (chance (0.25f)) { m["chorOn"] = 1.f; m["chorDepth"] = rf (0.15f, 0.4f); m["chorMix"] = rf (0.15f, 0.3f); }
+            break;
+
+        case 9: // Cordes (violons, violoncelles) + pizzicato
+        {
+            m["engine"] = (float) inst::Strings;
+            m["inst1"] = rf (0.3f, 0.8f);  m["inst2"] = rf (0.3f, 1.f);  m["inst3"] = rf (0.1f, 0.5f);  m["inst4"] = rf (0.2f, 0.6f);
+            m["cutoff"] = rl (5000, 14000);
+            const bool pizz = chance (0.2f);
+            m["attack"] = pizz ? 0.002f : rf (0.08f, 0.6f);
+            m["decay"] = pizz ? rf (0.2f, 0.4f) : 1.f;
+            m["sustain"] = pizz ? 0.f : 0.9f;
+            m["release"] = pizz ? rf (0.15f, 0.3f) : rf (0.4f, 1.2f);
+            mod (sWheel, dCutoff, 0.3f);
+            m["revOn"] = 1.f; m["revSize"] = rf (0.7f, 0.92f); m["revMix"] = rf (0.22f, 0.4f);
+            if (chance (0.3f)) { m["chorOn"] = 1.f; m["chorDepth"] = rf (0.2f, 0.4f); m["chorMix"] = rf (0.15f, 0.3f); }
+            break;
+        }
+
+        default: // Vents : flûte ou chœur
+            if (chance (0.5f))
+            {
+                m["engine"] = (float) inst::Flute;
+                m["inst1"] = rf (0.2f, 0.6f);  m["inst2"] = rf (0.15f, 0.6f);  m["inst3"] = rf (0.2f, 0.6f);  m["inst4"] = rf (0.2f, 0.7f);
+                m["attack"] = rf (0.03f, 0.1f); m["sustain"] = 0.9f; m["release"] = rf (0.15f, 0.4f);
+                if (chance (0.3f)) { m["mono"] = 1.f; m["glide"] = rf (0.03f, 0.08f); }
+            }
+            else
+            {
+                m["engine"] = (float) inst::Choir;
+                m["inst1"] = rf (0.f, 1.f);  m["inst2"] = rf (0.2f, 0.6f);  m["inst3"] = rf (0.4f, 1.f);  m["inst4"] = rf (0.1f, 0.4f);
+                m["attack"] = rf (0.2f, 0.8f); m["sustain"] = 0.9f; m["release"] = rf (0.6f, 1.5f);
+                lfo (1, 6, rl (0.1f, 0.4f));
+                mod (sLfo1, dPan, rf (0.1f, 0.3f));
+            }
+            m["cutoff"] = rl (6000, 15000);
+            m["decay"] = 1.f;
+            mod (sWheel, dPitch, 0.006f);
+            m["revOn"] = 1.f; m["revSize"] = rf (0.65f, 0.92f); m["revMix"] = rf (0.2f, 0.4f);
+            if (chance (0.3f)) { m["dlyOn"] = 1.f; m["dlyTime"] = pick ({ 375, 500 }); m["dlyFb"] = rf (0.2f, 0.4f); m["dlyMix"] = rf (0.08f, 0.2f); }
             break;
     }
 
@@ -274,7 +371,7 @@ std::map<juce::String, float> InfiniteProcessor::makePatch (int cat, int seed)
         if (on ("crushOn", 0.15f)) { m["crushBits"] = (float) (6 + r.nextInt (6)); m["crushRate"] = (float) (1 + r.nextInt (4)); m["crushMix"] = rf (0.3f, 0.7f); }
         if (on ("chorOn", 0.25f)) { m["chorDepth"] = rf (0.2f, 0.5f); m["chorMix"] = rf (0.2f, 0.4f); }
     }
-    else
+    else if (cat == 4)
     {
         if (on ("chorOn", 0.4f)) { m["chorDepth"] = rf (0.2f, 0.5f); m["chorMix"] = rf (0.2f, 0.4f); }
         if (on ("tremOn", 0.2f)) { m["tremRate"] = rf (3.f, 6.f); m["tremDepth"] = rf (0.2f, 0.4f); m["tremPan"] = rf (0.f, 1.f); }
@@ -303,19 +400,19 @@ std::map<juce::String, float> InfiniteProcessor::currentValues() const
 void InfiniteProcessor::loadSeed (int catSel, int seed)
 {
     seed = juce::jmax (1, seed);
-    catSel = juce::jlimit (1, 5, catSel);   // plus de banque Bass
+    catSel = juce::jlimit (1, kAllCat, catSel);   // plus de banque Bass
     int cat = catSel;
-    if (cat == 5)
+    if (cat == kAllCat)
     {
         juce::Random r ((juce::int64) seed * 977 + 3);
         r.nextInt();
-        cat = 1 + r.nextInt (4);
+        cat = 1 + r.nextInt (kNumCats);
     }
     applyValues (makePatch (cat, seed));
     apvts.state.setProperty ("seed", seed, nullptr);
     apvts.state.setProperty ("catSel", catSel, nullptr);
     apvts.state.setProperty ("presetName", makeName (cat, seed), nullptr);
-    const juce::String info = (catSel != 5 && seed <= kBankSize)
+    const juce::String info = (catSel != kAllCat && seed <= kBankSize)
         ? juce::String (kCats[cat]).toUpperCase() + " BANK   " + juce::String (seed).paddedLeft ('0', 2) + " / " + juce::String (kBankSize)
         : juce::String (kCats[cat]).toUpperCase() + "   generated #" + juce::String (seed);
     apvts.state.setProperty ("presetInfo", info, nullptr);
@@ -406,7 +503,11 @@ void InfiniteProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
             e->reset();
         }
         v.gate = false;
+        v.sustained = false;
+        v.iv.prepare (sampleRate);
     }
+    pedal = false;
+    cutS = 2000.f;  gainS = 0.5f;  driveS = 0.f;
     lastAmp.fill (-1.f);  lastE2.fill (-1.f);  lastE3.fill (-1.f);
     lastReso = -1.f;
     lastFilt = -1;
@@ -439,6 +540,8 @@ void InfiniteProcessor::readParams()
     P.attack = g ("attack");      P.decay = g ("decay");     P.sustain = g ("sustain");
     P.release = g ("release");    P.drive = g ("drive");     P.volume = g ("volume");
     P.mono = gb ("mono");         P.glide = g ("glide");
+    P.engine = juce::jlimit (0, (int) inst::NumEngines - 1, gi ("engine"));
+    P.macro = { g ("inst1"), g ("inst2"), g ("inst3"), g ("inst4") };
 
     for (int i = 0; i < lists::numLfos; ++i)
     {
@@ -521,8 +624,10 @@ float InfiniteProcessor::lfoValue (LfoState& s, int shape, float inc)
 
 void InfiniteProcessor::startVoice (Voice& v, int note, float vel)
 {
-    v.note = note;   v.vel = vel;   v.gate = true;
+    v.note = note;   v.vel = vel;   v.gate = true;   v.sustained = false;
     v.age = ++ageCounter;   v.samples = 0;
+    if (P.engine != inst::Synth) inst::start (v.iv, P.engine, (float) note, vel, P.macro, (float) sr);
+    else v.iv.engine = inst::Synth;
     v.relCount = 0;   v.fade = 1.f;
     v.curNote = v.targetNote = (float) note;
     v.rnd = rng.nextFloat() * 2.f - 1.f;
@@ -608,6 +713,7 @@ void InfiniteProcessor::noteOff (int note)
     for (auto& v : voices)
         if (v.gate && v.note == note)
         {
+            if (pedal) { v.sustained = true; continue; }   // pédale enfoncée : la note continue
             v.gate = false;
             v.relCount = 0;
             v.amp.noteOff(); v.env2.noteOff(); v.env3.noteOff();
@@ -623,7 +729,8 @@ void InfiniteProcessor::render (juce::AudioBuffer<float>& buffer, int start, int
 
     const float fs = (float) sr;
     const float twoPi = juce::MathConstants<float>::twoPi;
-    const float gain = juce::Decibels::decibelsToGain (P.volume);
+    const float gainT = juce::Decibels::decibelsToGain (P.volume);
+    const float smooth = 1.f - std::exp (-1.f / (0.012f * fs));   // lissage ~12 ms
     const float maxFc = std::min (18000.f, fs * 0.45f);
     const float glideCoef = P.glide > 0.001f ? 1.f - std::exp (-4.f / (P.glide * fs)) : 1.f;
     const int uni = P.uni;
@@ -646,6 +753,9 @@ void InfiniteProcessor::render (juce::AudioBuffer<float>& buffer, int start, int
             freeVal[(size_t) l] = lfoValue (freeLfo[(size_t) l], P.lfoShape[(size_t) l], P.lfoHz[(size_t) l] / fs);
 
         float outL = 0.f, outR = 0.f;
+        cutS   += (P.cutoff - cutS) * smooth;
+        gainS  += (gainT - gainS) * smooth;
+        driveS += (P.drive - driveS) * smooth;
 
         for (auto& v : voices)
         {
@@ -685,46 +795,55 @@ void InfiniteProcessor::render (juce::AudioBuffer<float>& buffer, int start, int
             const float fm    = juce::jmax (0.f, P.fm + d[dFm] * 4.f);
             const float wa1   = juce::jlimit (0.f, 1.f, P.warp1Amt + d[dWarp1]);
             const float wa2   = juce::jlimit (0.f, 1.f, P.warp2Amt + d[dWarp2]);
-            const float drive = juce::jlimit (0.f, 1.f, P.drive + d[dDrive]);
+            const float drive = juce::jlimit (0.f, 1.f, driveS + d[dDrive]);
             const float ampM  = juce::jlimit (0.f, 2.f, 1.f + d[dAmp]);
             const float pan   = juce::jlimit (-1.f, 1.f, d[dPan]);
             const float det   = juce::jlimit (0.f, 1.f, P.uniDetune + d[dDetune]);
 
-            const float mod = std::sin (twoPi * v.phMod);
-            v.phMod += f1 * P.fmRatio / fs;  if (v.phMod >= 1.f) v.phMod -= 1.f;
-            const float fmOff = 0.5f * fm * mod;
-
-            // ---- oscillateurs + unison ----
             float sl = 0.f, srr = 0.f;
-            for (int k = 0; k < uni; ++k)
+            if (v.iv.engine != inst::Synth)
             {
-                const float pos = uniPos[(size_t) k];
-                const float ratio = uni > 1 ? std::exp2 (pos * det * 0.5f / 12.f) : 1.f;
-                const float dt1 = f1 * ratio / fs, dt2 = f2 * ratio / fs;
-
-                float& p1 = v.ph1[(size_t) k];
-                float& p2 = v.ph2[(size_t) k];
-                float pm = p1 + fmOff;
-                pm -= std::floor (pm);
-
-                const float s = warpedOsc (P.w1, P.warp1, wa1, pm, dt1)
-                              + lvl2 * warpedOsc (P.w2, P.warp2, wa2, p2, dt2);
-
-                p1 += dt1;  if (p1 >= 1.f) p1 -= std::floor (p1);
-                p2 += dt2;  if (p2 >= 1.f) p2 -= std::floor (p2);
-
-                const float pp = pos * P.uniSpread;
-                sl  += s * (1.f - juce::jmax (0.f, pp));
-                srr += s * (1.f + juce::jmin (0.f, pp));
+                // ---- instrument modélisé ----
+                inst::render (v.iv, f1, P.macro, fs, sl, srr);
             }
-            sl *= uniNorm;  srr *= uniNorm;
+            else
+            {
+                const float mod = std::sin (twoPi * v.phMod);
+                v.phMod += f1 * P.fmRatio / fs;  if (v.phMod >= 1.f) v.phMod -= 1.f;
+                const float fmOff = 0.5f * fm * mod;
 
-            const float center = sub * std::sin (twoPi * v.phSub) + noise * (rng.nextFloat() * 2.f - 1.f);
-            v.phSub += f1 * 0.5f / fs;  if (v.phSub >= 1.f) v.phSub -= 1.f;
-            sl += center;  srr += center;
+                // ---- oscillateurs + unison ----
+                for (int k = 0; k < uni; ++k)
+                {
+                    const float pos = uniPos[(size_t) k];
+                    const float ratio = uni > 1 ? std::exp2 (pos * det * 0.5f / 12.f) : 1.f;
+                    const float dt1 = f1 * ratio / fs, dt2 = f2 * ratio / fs;
+
+                    float& p1 = v.ph1[(size_t) k];
+                    float& p2 = v.ph2[(size_t) k];
+                    float pm = p1 + fmOff;
+                    pm -= std::floor (pm);
+
+                    const float s = warpedOsc (P.w1, P.warp1, wa1, pm, dt1)
+                                  + lvl2 * warpedOsc (P.w2, P.warp2, wa2, p2, dt2);
+
+                    p1 += dt1;  if (p1 >= 1.f) p1 -= std::floor (p1);
+                    p2 += dt2;  if (p2 >= 1.f) p2 -= std::floor (p2);
+
+                    const float pp = pos * P.uniSpread;
+                    sl  += s * (1.f - juce::jmax (0.f, pp));
+                    srr += s * (1.f + juce::jmin (0.f, pp));
+                }
+                sl *= uniNorm;  srr *= uniNorm;
+
+                const float center = sub * std::sin (twoPi * v.phSub) + noise * (rng.nextFloat() * 2.f - 1.f);
+                v.phSub += f1 * 0.5f / fs;  if (v.phSub >= 1.f) v.phSub -= 1.f;
+                sl += center;  srr += center;
+
+            }
 
             // ---- filtre ----
-            float fc = P.cutoff * std::exp2 (P.envAmt * e2 + d[dCutoff] * 5.f + P.keyTrack * (v.curNote - 60.f) / 12.f);
+            float fc = cutS * std::exp2 (P.envAmt * e2 + d[dCutoff] * 5.f + P.keyTrack * (v.curNote - 60.f) / 12.f);
             fc = juce::jlimit (30.f, maxFc, fc);
             const float q = juce::jlimit (0.5f, 10.f, P.reso + d[dReso] * 4.f);
             v.fA.setCutoffFrequency (fc);  v.fA.setResonance (q);
@@ -762,8 +881,8 @@ void InfiniteProcessor::render (juce::AudioBuffer<float>& buffer, int start, int
             }
         }
 
-        left[i] = std::tanh (outL * gain);
-        if (right != nullptr) right[i] = std::tanh (outR * gain);
+        left[i] = std::tanh (outL * gainS);
+        if (right != nullptr) right[i] = std::tanh (outR * gainS);
     }
 }
 
@@ -793,9 +912,21 @@ void InfiniteProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
         else if (m.isNoteOff())  noteOff (m.getNoteNumber());
         else if (m.isPitchWheel()) bend = (float) (m.getPitchWheelValue() - 8192) / 8192.f * 2.f;
         else if (m.isController() && m.getControllerNumber() == 1) modWheel = (float) m.getControllerValue() / 127.f;
+        else if (m.isController() && m.getControllerNumber() == 64)
+        {
+            pedal = m.getControllerValue() >= 64;
+            if (! pedal)
+                for (auto& v : voices)
+                    if (v.gate && v.sustained)
+                    {
+                        v.gate = false; v.sustained = false; v.relCount = 0;
+                        v.amp.noteOff(); v.env2.noteOff(); v.env3.noteOff();
+                    }
+        }
         else if (m.isAllNotesOff() || m.isAllSoundOff())
         {
             heldCount = 0;
+            pedal = false;
             for (auto& v : voices)
                 if (v.gate) { v.gate = false; v.relCount = 0; v.amp.noteOff(); v.env2.noteOff(); v.env3.noteOff(); }
         }
