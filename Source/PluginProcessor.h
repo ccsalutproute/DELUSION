@@ -262,6 +262,11 @@ private:
 
     std::array<Voice, 16> voices;
     bool pedal = false;
+    juce::SharedResourcePointer<SampleLibrary> samples;   // vrais enregistrements (partagés)
+    int lastVariantKey = -1;
+public:
+    SampleLibrary& getSamples() { return *samples; }
+private:
     float cutS = 2000.f, gainS = 0.5f, driveS = 0.f;   // valeurs lissées (pas de craquements)
     std::vector<Fav> favs;
     juce::Random rng;

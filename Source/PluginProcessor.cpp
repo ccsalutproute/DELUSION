@@ -247,21 +247,19 @@ std::map<juce::String, float> InfiniteProcessor::makePatch (int cat, int seed)
             mod (sWheel, dAmp, -0.4f);
             break;
 
-        case 5: // Piano
+        case 5: // Piano (vrais enregistrements : Grand / Upright)
         {
             m["engine"] = (float) inst::Piano;
-            const bool felt = chance (0.3f);                     // piano feutré "lo-fi"
-            m["inst1"] = felt ? rf (0.05f, 0.3f) : rf (0.35f, 0.85f);
-            m["inst2"] = rf (0.05f, 0.45f);
-            m["inst3"] = rf (0.45f, 0.9f);
-            m["inst4"] = felt ? rf (0.05f, 0.2f) : rf (0.2f, 0.6f);
-            m["cutoff"] = felt ? rl (2500, 6000) : rl (9000, 16000);
-            m["attack"] = 0.001f; m["decay"] = 3.f; m["sustain"] = 1.f; m["release"] = rf (0.25f, 0.6f);
-            mod (sVel, dCutoff, rf (0.05f, 0.15f));
-            m["revOn"] = 1.f; m["revSize"] = felt ? rf (0.6f, 0.9f) : rf (0.45f, 0.75f); m["revMix"] = rf (0.15f, 0.32f); m["revDamp"] = rf (0.4f, 0.7f);
-            if (chance (0.2f)) { m["chorOn"] = 1.f; m["chorDepth"] = rf (0.1f, 0.3f); m["chorMix"] = rf (0.1f, 0.25f); }
-            if (felt && chance (0.5f)) { m["crushOn"] = 1.f; m["crushBits"] = (float) (10 + r.nextInt (4)); m["crushRate"] = 1.f; m["crushMix"] = rf (0.2f, 0.4f); }
-            if (chance (0.25f)) { m["dlyOn"] = 1.f; m["dlyTime"] = pick ({ 375, 500 }); m["dlyFb"] = rf (0.2f, 0.4f); m["dlyMix"] = rf (0.08f, 0.2f); }
+            const bool felt = chance (0.3f);                     // piano doux et sombre "lo-fi"
+            m["inst2"] = chance (0.7f) ? 0.2f : 0.7f;            // Grand ou Upright
+            m["inst1"] = felt ? rf (0.35f, 0.55f) : rf (0.8f, 1.f);
+            m["inst3"] = rf (0.4f, 0.7f);
+            m["inst4"] = rf (0.45f, 0.75f);
+            m["cutoff"] = felt ? rl (3000, 7000) : 16000.f;
+            m["attack"] = 0.001f; m["decay"] = 3.f; m["sustain"] = 1.f; m["release"] = rf (0.3f, 0.7f);
+            m["revOn"] = 1.f; m["revSize"] = felt ? rf (0.6f, 0.9f) : rf (0.45f, 0.75f); m["revMix"] = rf (0.12f, 0.28f); m["revDamp"] = rf (0.4f, 0.7f);
+            if (felt && chance (0.5f)) { m["crushOn"] = 1.f; m["crushBits"] = (float) (10 + r.nextInt (4)); m["crushRate"] = 1.f; m["crushMix"] = rf (0.15f, 0.35f); }
+            if (chance (0.2f)) { m["dlyOn"] = 1.f; m["dlyTime"] = pick ({ 375, 500 }); m["dlyFb"] = rf (0.2f, 0.4f); m["dlyMix"] = rf (0.06f, 0.16f); }
             break;
         }
 
@@ -278,69 +276,56 @@ std::map<juce::String, float> InfiniteProcessor::makePatch (int cat, int seed)
             m["revOn"] = chance (0.75f) ? 1.f : 0.f; m["revSize"] = rf (0.4f, 0.75f); m["revMix"] = rf (0.12f, 0.3f);
             break;
 
-        case 7: // Brass
+        case 7: // Brass (trompette, trombone, cor, section)
+        {
             m["engine"] = (float) inst::Brass;
-            m["inst1"] = rf (0.3f, 0.9f);  m["inst2"] = rf (0.f, 0.45f);  m["inst3"] = rf (0.1f, 0.6f);
-            m["inst4"] = chance (0.5f) ? 0.f : rf (0.5f, 1.f);
+            m["inst2"] = pick ({ 0.1f, 0.1f, 0.35f, 0.6f, 0.85f, 0.85f });
+            m["inst1"] = rf (0.75f, 1.f);  m["inst3"] = rf (0.4f, 0.7f);  m["inst4"] = rf (0.5f, 0.8f);
             m["cutoff"] = 16000.f;
-            m["attack"] = rf (0.008f, 0.03f); m["decay"] = 1.f; m["sustain"] = 0.9f; m["release"] = rf (0.1f, 0.3f);
-            if (m["inst4"] < 0.1f && chance (0.5f)) { m["mono"] = 1.f; m["glide"] = rf (0.02f, 0.06f); }
-            mod (sVel, dCutoff, rf (0.1f, 0.2f));
+            m["attack"] = rf (0.003f, 0.02f); m["decay"] = 1.f; m["sustain"] = 1.f; m["release"] = rf (0.2f, 0.4f);
+            if (m["inst2"] < 0.3f && chance (0.4f)) { m["mono"] = 1.f; m["glide"] = rf (0.02f, 0.05f); }
             mod (sWheel, dPitch, 0.01f);
             m["revOn"] = 1.f; m["revSize"] = rf (0.5f, 0.85f); m["revMix"] = rf (0.15f, 0.3f);
-            if (chance (0.3f)) { m["dlyOn"] = 1.f; m["dlyTime"] = pick ({ 250, 375 }); m["dlyFb"] = rf (0.15f, 0.35f); m["dlyMix"] = rf (0.08f, 0.18f); }
-            break;
-
-        case 8: // Cordes pincées : guitare, harpe, kalimba
-            m["engine"] = (float) inst::Plucked;
-            m["inst1"] = rf (0.3f, 0.9f);
-            m["inst2"] = pick ({ rf (0.f, 0.25f), rf (0.4f, 0.6f), rf (0.8f, 1.f) });
-            m["inst3"] = rf (0.3f, 0.85f);  m["inst4"] = rf (0.1f, 0.6f);
-            m["cutoff"] = rl (6000, 16000);
-            m["attack"] = 0.001f; m["decay"] = 3.f; m["sustain"] = 1.f; m["release"] = rf (0.2f, 0.5f);
-            mod (sVel, dCutoff, rf (0.05f, 0.15f));
-            if (chance (0.5f)) { m["dlyOn"] = 1.f; m["dlyTime"] = pick ({ 250, 375, 500 }); m["dlyFb"] = rf (0.2f, 0.45f); m["dlyMix"] = rf (0.1f, 0.25f); }
-            m["revOn"] = chance (0.75f) ? 1.f : 0.f; m["revSize"] = rf (0.4f, 0.8f); m["revMix"] = rf (0.12f, 0.3f);
-            if (chance (0.25f)) { m["chorOn"] = 1.f; m["chorDepth"] = rf (0.15f, 0.4f); m["chorMix"] = rf (0.15f, 0.3f); }
-            break;
-
-        case 9: // Cordes (violons, violoncelles) + pizzicato
-        {
-            m["engine"] = (float) inst::Strings;
-            m["inst1"] = rf (0.3f, 0.8f);  m["inst2"] = rf (0.3f, 1.f);  m["inst3"] = rf (0.1f, 0.5f);  m["inst4"] = rf (0.2f, 0.6f);
-            m["cutoff"] = rl (5000, 14000);
-            const bool pizz = chance (0.2f);
-            m["attack"] = pizz ? 0.002f : rf (0.08f, 0.6f);
-            m["decay"] = pizz ? rf (0.2f, 0.4f) : 1.f;
-            m["sustain"] = pizz ? 0.f : 0.9f;
-            m["release"] = pizz ? rf (0.15f, 0.3f) : rf (0.4f, 1.2f);
-            mod (sWheel, dCutoff, 0.3f);
-            m["revOn"] = 1.f; m["revSize"] = rf (0.7f, 0.92f); m["revMix"] = rf (0.22f, 0.4f);
-            if (chance (0.3f)) { m["chorOn"] = 1.f; m["chorDepth"] = rf (0.2f, 0.4f); m["chorMix"] = rf (0.15f, 0.3f); }
+            if (chance (0.25f)) { m["dlyOn"] = 1.f; m["dlyTime"] = pick ({ 250, 375 }); m["dlyFb"] = rf (0.15f, 0.35f); m["dlyMix"] = rf (0.06f, 0.15f); }
             break;
         }
 
-        default: // Vents : flûte ou chœur
-            if (chance (0.5f))
-            {
-                m["engine"] = (float) inst::Flute;
-                m["inst1"] = rf (0.2f, 0.6f);  m["inst2"] = rf (0.15f, 0.6f);  m["inst3"] = rf (0.2f, 0.6f);  m["inst4"] = rf (0.2f, 0.7f);
-                m["attack"] = rf (0.03f, 0.1f); m["sustain"] = 0.9f; m["release"] = rf (0.15f, 0.4f);
-                if (chance (0.3f)) { m["mono"] = 1.f; m["glide"] = rf (0.03f, 0.08f); }
-            }
-            else
-            {
-                m["engine"] = (float) inst::Choir;
-                m["inst1"] = rf (0.f, 1.f);  m["inst2"] = rf (0.2f, 0.6f);  m["inst3"] = rf (0.4f, 1.f);  m["inst4"] = rf (0.1f, 0.4f);
-                m["attack"] = rf (0.2f, 0.8f); m["sustain"] = 0.9f; m["release"] = rf (0.6f, 1.5f);
-                lfo (1, 6, rl (0.1f, 0.4f));
-                mod (sLfo1, dPan, rf (0.1f, 0.3f));
-            }
-            m["cutoff"] = rl (6000, 15000);
-            m["decay"] = 1.f;
+        case 8: // Cordes pincées : guitares, harpe, kalimba
+            m["engine"] = (float) inst::Plucked;
+            m["inst2"] = pick ({ 0.1f, 0.1f, 0.35f, 0.35f, 0.6f, 0.85f });
+            m["inst1"] = rf (0.7f, 1.f);  m["inst3"] = rf (0.4f, 0.7f);  m["inst4"] = rf (0.5f, 0.85f);
+            m["cutoff"] = 16000.f;
+            m["attack"] = 0.001f; m["decay"] = 3.f; m["sustain"] = 1.f; m["release"] = rf (0.3f, 0.8f);
+            if (chance (0.45f)) { m["dlyOn"] = 1.f; m["dlyTime"] = pick ({ 250, 375, 500 }); m["dlyFb"] = rf (0.2f, 0.45f); m["dlyMix"] = rf (0.08f, 0.22f); }
+            m["revOn"] = chance (0.75f) ? 1.f : 0.f; m["revSize"] = rf (0.4f, 0.8f); m["revMix"] = rf (0.12f, 0.28f);
+            if (chance (0.2f)) { m["chorOn"] = 1.f; m["chorDepth"] = rf (0.15f, 0.35f); m["chorMix"] = rf (0.12f, 0.25f); }
+            break;
+
+        case 9: // Cordes : ensemble, trémolo, pizzicato, violon solo
+        {
+            m["engine"] = (float) inst::Strings;
+            m["inst2"] = pick ({ 0.1f, 0.1f, 0.1f, 0.35f, 0.6f, 0.85f });
+            const bool pizz = m["inst2"] > 0.5f && m["inst2"] < 0.75f;
+            m["inst1"] = rf (0.7f, 1.f);  m["inst3"] = rf (0.35f, 0.65f);  m["inst4"] = rf (0.6f, 0.9f);
+            m["cutoff"] = 16000.f;
+            m["attack"] = pizz ? 0.001f : rf (0.02f, 0.35f);
+            m["decay"] = 1.f;  m["sustain"] = 1.f;
+            m["release"] = pizz ? rf (0.2f, 0.4f) : rf (0.4f, 1.f);
+            mod (sWheel, dCutoff, 0.25f);
+            m["revOn"] = 1.f; m["revSize"] = rf (0.7f, 0.92f); m["revMix"] = rf (0.2f, 0.38f);
+            break;
+        }
+
+        default: // Vents : flûte, hautbois, clarinette, saxophone
+            m["engine"] = (float) inst::Flute;
+            m["inst2"] = pick ({ 0.1f, 0.1f, 0.35f, 0.6f, 0.85f, 0.85f });
+            m["inst1"] = rf (0.75f, 1.f);  m["inst3"] = rf (0.4f, 0.7f);  m["inst4"] = rf (0.4f, 0.7f);
+            m["cutoff"] = 16000.f;
+            m["attack"] = rf (0.005f, 0.04f); m["decay"] = 1.f; m["sustain"] = 1.f; m["release"] = rf (0.15f, 0.35f);
+            if (chance (0.35f)) { m["mono"] = 1.f; m["glide"] = rf (0.02f, 0.06f); }
             mod (sWheel, dPitch, 0.006f);
-            m["revOn"] = 1.f; m["revSize"] = rf (0.65f, 0.92f); m["revMix"] = rf (0.2f, 0.4f);
-            if (chance (0.3f)) { m["dlyOn"] = 1.f; m["dlyTime"] = pick ({ 375, 500 }); m["dlyFb"] = rf (0.2f, 0.4f); m["dlyMix"] = rf (0.08f, 0.2f); }
+            m["revOn"] = 1.f; m["revSize"] = rf (0.6f, 0.9f); m["revMix"] = rf (0.18f, 0.35f);
+            if (chance (0.3f)) { m["dlyOn"] = 1.f; m["dlyTime"] = pick ({ 375, 500 }); m["dlyFb"] = rf (0.2f, 0.4f); m["dlyMix"] = rf (0.06f, 0.16f); }
             break;
     }
 
@@ -543,6 +528,18 @@ void InfiniteProcessor::readParams()
     P.engine = juce::jlimit (0, (int) inst::NumEngines - 1, gi ("engine"));
     P.macro = { g ("inst1"), g ("inst2"), g ("inst3"), g ("inst4") };
 
+    // on prépare à l'avance les enregistrements de l'instrument choisi
+    if (inst::isSampled (P.engine))
+    {
+        const int key = P.engine * 16 + inst::variantIndex (P.engine, P.macro[1]);
+        if (key != lastVariantKey)
+        {
+            lastVariantKey = key;
+            for (auto* id : inst::variants (P.engine)[(size_t) inst::variantIndex (P.engine, P.macro[1])].ids)
+                if (id != nullptr) samples->request (id);
+        }
+    }
+
     for (int i = 0; i < lists::numLfos; ++i)
     {
         const juce::String n (i + 1);
@@ -626,8 +623,26 @@ void InfiniteProcessor::startVoice (Voice& v, int note, float vel)
 {
     v.note = note;   v.vel = vel;   v.gate = true;   v.sustained = false;
     v.age = ++ageCounter;   v.samples = 0;
-    if (P.engine != inst::Synth) inst::start (v.iv, P.engine, (float) note, vel, P.macro, (float) sr);
-    else v.iv.engine = inst::Synth;
+    if (P.engine != inst::Synth)
+    {
+        bool ok = false;
+        if (inst::isSampled (P.engine) && samples->available())
+        {
+            const auto& vars = inst::variants (P.engine);
+            const auto& var = vars[(size_t) inst::variantIndex (P.engine, P.macro[1])];
+            SampleInstrument* layers[3] = { nullptr, nullptr, nullptr };
+            int n = 0;
+            for (auto* id : var.ids)
+                if (id != nullptr) layers[n++] = samples->get (id);
+            ok = inst::startSampled (v.iv, P.engine, layers, n, (float) note, vel, P.macro);
+        }
+        if (! ok) inst::start (v.iv, P.engine, (float) note, vel, P.macro, (float) sr);   // modèle de secours
+    }
+    else
+    {
+        v.iv.engine = inst::Synth;
+        v.iv.sampled = false;
+    }
     v.relCount = 0;   v.fade = 1.f;
     v.curNote = v.targetNote = (float) note;
     v.rnd = rng.nextFloat() * 2.f - 1.f;
@@ -805,6 +820,7 @@ void InfiniteProcessor::render (juce::AudioBuffer<float>& buffer, int start, int
             {
                 // ---- instrument modélisé ----
                 inst::render (v.iv, f1, P.macro, fs, sl, srr);
+                if (v.iv.finished()) v.fade = 0.f;   // l'enregistrement est terminé : la voix se libère
             }
             else
             {

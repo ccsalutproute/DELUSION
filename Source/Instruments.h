@@ -3,6 +3,7 @@
 #include <array>
 #include <cmath>
 #include <vector>
+#include "SampleLibrary.h"
 
 // ======================================================================
 //  Instruments modélisés (sans échantillons) :
@@ -16,12 +17,46 @@ namespace inst
 
     inline juce::StringArray engineNames()
     {
-        return { "Synth", "Piano", "E-Piano", "Brass", "Plucked", "Strings", "Flute", "Choir" };
+        return { "Synth", "Piano", "E-Piano", "Brass", "Plucked", "Strings", "Winds", "Choir" };
+    }
+
+    // ---- instruments joués avec de vrais enregistrements ----
+    inline bool isSampled (int engine)
+    {
+        return engine == Piano || engine == Brass || engine == Plucked || engine == Strings || engine == Flute;
+    }
+
+    struct Variant { const char* name; const char* ids[3]; };
+
+    inline const std::vector<Variant>& variants (int engine)
+    {
+        static const std::vector<Variant> none;
+        static const std::vector<Variant> piano   { { "Grand Piano", { "piano_grand" } }, { "Upright Piano", { "piano_upright" } } };
+        static const std::vector<Variant> brass   { { "Trumpet", { "trumpet" } }, { "Trombone", { "trombone" } },
+                                                    { "French Horn", { "horn" } }, { "Brass Section", { "trumpet", "trombone", "horn" } } };
+        static const std::vector<Variant> plucked { { "Nylon Guitar", { "guitar_nylon" } }, { "Steel Guitar", { "guitar_steel" } },
+                                                    { "Harp", { "harp" } }, { "Kalimba", { "kalimba" } } };
+        static const std::vector<Variant> strings { { "String Ensemble", { "strings_ens" } }, { "Tremolo Strings", { "strings_trem" } },
+                                                    { "Pizzicato", { "strings_pizz" } }, { "Solo Violin", { "violin_solo" } } };
+        static const std::vector<Variant> winds   { { "Flute", { "flute" } }, { "Oboe", { "oboe" } },
+                                                    { "Clarinet", { "clarinet" } }, { "Tenor Sax", { "sax" } } };
+        switch (engine)
+        {
+            case Piano: return piano;  case Brass: return brass;  case Plucked: return plucked;
+            case Strings: return strings;  case Flute: return winds;  default: return none;
+        }
+    }
+
+    inline int variantIndex (int engine, float macro2)
+    {
+        const int n = (int) variants (engine).size();
+        return n == 0 ? 0 : juce::jlimit (0, n - 1, (int) (macro2 * (float) n));
     }
 
     // noms des 4 macros pour chaque instrument
-    inline juce::StringArray macroNames (int engine)
+    inline juce::StringArray macroNames (int engine, bool sampled = false)
     {
+        if (sampled && isSampled (engine)) return { "Tone", "Model", "Dynamics", "Width" };
         switch (engine)
         {
             case Piano:   return { "Tone", "Detune", "Sustain", "Hammer" };
@@ -108,15 +143,97 @@ namespace inst
         // ---- flûte ----
         float vibPh = 0.f;
 
+        // ---- lecteur d'enregistrements ----
+        struct Player { const SampleZone* z = nullptr; double pos = 0.0; float gain = 1.f; bool done = true; };
+        bool sampled = false;
+        std::array<Player, 3> pl {};
+        float sLpL = 0.f, sLpR = 0.f, velGain = 1.f;
+        bool finished() const
+        {
+            if (! sampled) return false;
+            for (auto& p : pl) if (! p.done) return false;
+            return true;
+        }
+
         void prepare (double fs)
         {
             ks.assign ((size_t) (fs / 15.0) + 16, 0.f);
         }
     };
 
+    // ------------------------------------------------------------------ note jouée avec des enregistrements
+    // renvoie false si aucun enregistrement ne couvre la note
+    inline bool startSampled (Voice& v, int engine, SampleInstrument* const* layers, int nLayers,
+                              float note, float vel, const std::array<float, 4>& m)
+    {
+        int used = 0;
+        const int vel127 = juce::jlimit (1, 127, (int) std::lround (vel * 127.f));
+        for (auto& p : v.pl) { p.z = nullptr; p.done = true; p.pos = 0.0; }
+        for (int i = 0; i < nLayers && used < 3; ++i)
+            if (layers[i] != nullptr)
+                if (auto* z = layers[i]->pick ((int) std::lround (note), vel127))
+                {
+                    auto& p = v.pl[(size_t) used++];
+                    p.z = z;  p.pos = 0.0;  p.done = false;
+                }
+        if (used == 0) { v.sampled = false; return false; }
+        for (int i = 0; i < used; ++i) v.pl[(size_t) i].gain = 1.f / std::sqrt ((float) used);
+        v.engine = engine;
+        v.sampled = true;
+        v.note = note;  v.vel = vel;  v.t = 0.f;
+        v.sLpL = v.sLpR = 0.f;
+        v.velGain = std::pow (juce::jmax (0.02f, vel), 0.15f + 1.35f * m[2]);
+        return true;
+    }
+
+    inline float zoneAt (const SampleZone& z, int i, int ch)
+    {
+        if (z.loopEnd > 0 && i >= z.loopEnd) i -= (z.loopEnd - z.loopStart);
+        i = juce::jlimit (0, juce::jmax (0, z.len - 1), i);
+        return (float) z.data[(size_t) i * 2 + (size_t) ch] * (1.f / 32767.f);
+    }
+
+    inline void renderSampled (Voice& v, float freq, const std::array<float, 4>& m, float fs, float& L, float& R)
+    {
+        L = R = 0.f;
+        for (auto& p : v.pl)
+        {
+            if (p.done || p.z == nullptr) continue;
+            const auto& z = *p.z;
+            const int i = (int) p.pos;
+            const float f = (float) (p.pos - (double) i);
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                // interpolation d'Hermite (4 points) : son propre même en transposant
+                const float y0 = zoneAt (z, i - 1, ch), y1 = zoneAt (z, i, ch), y2 = zoneAt (z, i + 1, ch), y3 = zoneAt (z, i + 2, ch);
+                const float c1 = 0.5f * (y2 - y0);
+                const float c2 = y0 - 2.5f * y1 + 2.f * y2 - 0.5f * y3;
+                const float c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
+                const float s = ((c3 * f + c2) * f + c1) * f + y1;
+                (ch == 0 ? L : R) += s * p.gain;
+            }
+            p.pos += (double) (freq / z.keyFreq) * (z.sr / (double) fs);
+            if (z.loopEnd > 0 && p.pos >= (double) z.loopEnd) p.pos -= (double) (z.loopEnd - z.loopStart);
+            else if (p.pos >= (double) (z.len - 2)) p.done = true;
+        }
+        // tonalité (passe-bas doux), puis largeur stéréo
+        if (m[0] < 0.97f)
+        {
+            const float fc = 900.f * std::exp2 (m[0] * 4.4f);
+            const float c = 1.f - std::exp (-juce::MathConstants<float>::twoPi * fc / fs);
+            v.sLpL += c * (L - v.sLpL);
+            v.sLpR += c * (R - v.sLpR);
+            L = v.sLpL;  R = v.sLpR;
+        }
+        const float mid = 0.5f * (L + R), side = 0.5f * (L - R) * (m[3] * 2.f);
+        L = (mid + side) * v.velGain * 2.6f;
+        R = (mid - side) * v.velGain * 2.6f;
+    }
+
     // ------------------------------------------------------------------ démarrage d'une note
     inline void start (Voice& v, int engine, float note, float vel, const std::array<float, 4>& m, float fs)
     {
+        v.sampled = false;
         v.engine = engine;
         v.note = note;
         v.vel = vel;
@@ -291,6 +408,7 @@ namespace inst
     // ------------------------------------------------------------------ un échantillon (stéréo)
     inline void render (Voice& v, float freq, const std::array<float, 4>& m, float fs, float& L, float& R)
     {
+        if (v.sampled) { renderSampled (v, freq, m, fs, L, R); return; }
         const float twoPi = juce::MathConstants<float>::twoPi;
         const float dtT = 1.f / fs;
         v.t += dtT;
