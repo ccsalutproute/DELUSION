@@ -13,13 +13,29 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0
       - name: Build
         run: cmake --build build --config Release --parallel
+      - name: Cache des enregistrements
+        uses: actions/cache@v4
+        with:
+          path: sample_sources
+          key: samples-${{ hashFiles('Source/prepare_samples.py') }}
+      - name: Prepare real instrument samples
+        run: |
+          PREP=$(find build -type f -name SamplePrep -perm -u+x | head -n 1)
+          echo "SamplePrep: $PREP"
+          python3 Source/prepare_samples.py --prep "$PREP" --out samples_out --work sample_sources
+          du -sh samples_out
       - name: Sign and zip
         run: |
-          P=$(find build -type d -name "*.vst3" | head -n 1)
+          P=$(find build -type d -name "Delusion.vst3" | head -n 1)
           echo "Found: $P"
+          mkdir -p "$P/Contents/Resources"
+          rm -rf "$P/Contents/Resources/Samples"
+          cp -R samples_out "$P/Contents/Resources/Samples"
           codesign --force --deep -s - "$P"
           ditto -c -k --keepParent "$P" Delusion-VST3-mac.zip
+          ls -lh Delusion-VST3-mac.zip
       - uses: actions/upload-artifact@v4
         with:
           name: Delusion-VST3-mac
           path: Delusion-VST3-mac.zip
+          compression-level: 0
