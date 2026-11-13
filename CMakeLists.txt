@@ -42,3 +42,11 @@ target_link_libraries(Delusion
             juce::juce_dsp
     PUBLIC juce::juce_recommended_config_flags
            juce::juce_recommended_lto_flags)
+
+# Outil utilisé pendant la compilation pour préparer la banque de vrais enregistrements
+juce_add_console_app(SamplePrep PRODUCT_NAME "SamplePrep")
+target_sources(SamplePrep PRIVATE Source/SamplePrep.cpp)
+target_compile_definitions(SamplePrep PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+target_link_libraries(SamplePrep
+    PRIVATE juce::juce_audio_formats
+    PUBLIC juce::juce_recommended_config_flags)
